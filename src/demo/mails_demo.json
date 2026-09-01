@@ -1,0 +1,56 @@
+[
+  {
+    "remitente": "cliente.uno@mail.com",
+    "asunto": "Estado de mi reclamación",
+    "cuerpo": "Hola, ¿me podéis decir cómo va mi expediente? Gracias.",
+    "adjuntos": []
+  },
+  {
+    "remitente": "MAILER-DAEMON@out.mail.com",
+    "asunto": "Undelivered Mail Returned to Sender",
+    "cuerpo": "This is the mail system at host...",
+    "adjuntos": []
+  },
+  {
+    "remitente": "cliente.uno@mail.com",
+    "asunto": "Envío factura",
+    "cuerpo": "Os adjunto la factura de compra del vehículo.",
+    "adjuntos": [
+      {
+        "nombre": "factura.pdf",
+        "is_inline": false,
+        "bytes": 240000
+      }
+    ]
+  },
+  {
+    "remitente": "desconocido@nuevo.com",
+    "asunto": "Información",
+    "cuerpo": "Buenas, quisiera saber si mi coche puede reclamar.",
+    "adjuntos": []
+  },
+  {
+    "remitente": "cliente.dos@mail.com",
+    "asunto": "Consulta contrato",
+    "cuerpo": "Tras el fallecimiento de mi padre, titular del expediente, ¿cómo queda su reclamación?",
+    "adjuntos": []
+  },
+  {
+    "remitente": "cliente.tres@mail.com",
+    "asunto": "Duda",
+    "cuerpo": "¿Qué documentación necesito para continuar?",
+    "adjuntos": []
+  },
+  {
+    "remitente": "cliente.uno@mail.com",
+    "asunto": "Gracias",
+    "cuerpo": "Recibido, muchas gracias por la información.",
+    "adjuntos": [
+      {
+        "nombre": "image001.png",
+        "is_inline": false,
+        "bytes": 9000
+      }
+    ]
+  }
+]
