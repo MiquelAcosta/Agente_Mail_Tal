@@ -1,0 +1,23 @@
+{
+  "ia": {
+    "base_url": "http://localhost:11434/v1",
+    "api_key": "ollama",
+    "modelo": "qwen2.5:7b"
+  },
+  "historial": [
+    "cliente.uno@mail.com",
+    "cliente.dos@mail.com"
+  ],
+  "bbdd": {
+    "cliente.uno@mail.com": {
+      "matricula": "2717GJD",
+      "titular": "Cliente Uno",
+      "estado": "En fase de demanda presentada"
+    },
+    "cliente.dos@mail.com": {
+      "matricula": "4501KLM",
+      "titular": "Cliente Dos",
+      "estado": "Pendiente de documentación: falta factura de compra"
+    }
+  }
+}

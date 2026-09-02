@@ -52,7 +52,11 @@ def cargar_escenario():
         with open(RUTA_ESC, "w", encoding="utf-8") as f:
             json.dump(ESC_DEFECTO, f, ensure_ascii=False, indent=2)
         print(f"(Creado {RUTA_ESC} con el escenario por defecto — editalo para cambiar variables)\n")
-    return json.load(open(RUTA_ESC, encoding="utf-8"))
+    esc = json.load(open(RUTA_ESC, encoding="utf-8-sig"))
+    # Normalizar: mayusculas y espacios en el escenario ya no importan
+    esc["historial"] = [h.strip().lower() for h in esc["historial"]]
+    esc["bbdd"] = {k.strip().lower(): v for k, v in esc["bbdd"].items()}
+    return esc
 
 
 def clasificar(ia, asunto, cuerpo, hilo=""):
