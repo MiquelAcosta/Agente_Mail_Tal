@@ -103,7 +103,7 @@ def llamar(ia, system, user):
     with urllib.request.urlopen(req, timeout=300) as r:
         data = json.loads(r.read().decode("utf-8"))
     t = data["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
-    return json.loads(t[t.find("{"):t.rfind("}") + 1])
+    return json.loads(t[t.find("{"):t.rfind("}") + 1], strict=False)
 
 
 def log_init():
@@ -215,9 +215,13 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                             else:
                                 reply = msg.Reply()
                                 reply.Body = respuesta + "\n\n" + reply.Body
+                                destino_seguro = esc.get("borradores_para", "").strip()
+                                if destino_seguro:
+                                    reply.To = destino_seguro  # cinturo del pilot: mai a clients reals
                                 reply.Save()  # <- ESBORRANY. Mai .Send()
                                 creados += 1
-                                resultado = "BORRADOR CREADO en Outlook"
+                                resultado = ("BORRADOR CREADO en Outlook"
+                                             + (f" (destinatari forcat: {destino_seguro})" if destino_seguro else ""))
                             print("    ---- RESPUESTA " + "-" * 38)
                             for lin in respuesta.split("\n"):
                                 print(f"    | {lin}")
