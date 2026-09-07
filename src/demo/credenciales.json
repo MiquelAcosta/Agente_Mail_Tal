@@ -1,0 +1,9 @@
+{
+  "bbdd": {
+    "host": "wp-produccion.cluster-col7r5cdnsuz.eu-west-3.rds.amazonaws.com",
+    "puerto": 3306,
+    "esquema": "bitnami_wordpress",
+    "usuario": "macosta_allura",
+    "password": "XHHS-LSEJA-JYGDH-SKIJD-8276-1AHST-SF8VH"
+  }
+}
