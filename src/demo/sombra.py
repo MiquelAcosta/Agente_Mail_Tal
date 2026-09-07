@@ -42,6 +42,33 @@ def cargar_escenario():
     return esc
 
 
+class BBDDConectada:
+    """Aspecte de diccionari per al triatge: primer la BBDD real (si hi ha
+    credenciales.json i connector), despres l'escenario.json com a reserva."""
+    def __init__(self, esc_bbdd):
+        self.mock = esc_bbdd
+        self.modo = "escenario.json"
+        self._real = None
+        if os.path.exists(os.path.join(AQUI, "credenciales.json")):
+            try:
+                sys.path.insert(0, AQUI)
+                from conector_bbdd import ficha_por_email
+                self._real = ficha_por_email
+                self.modo = "BBDD REAL (+ escenario de reserva)"
+            except Exception as e:
+                print(f"(Connector BBDD no carregat: {e} — s'usa escenario.json)")
+
+    def get(self, email, default=None):
+        if self._real is not None:
+            try:
+                f = self._real(email)
+                if f:
+                    return f
+            except Exception as e:
+                print(f"  (avis: BBDD real ha fallat: {str(e)[:70]} — provant escenari)")
+        return self.mock.get(email, default)
+
+
 def clasificar(ia, asunto, cuerpo):
     payload = json.dumps({"model": ia["modelo"], "temperature": 0,
         "messages": [{"role": "system", "content": PROMPT_CLASIFICADOR},
@@ -152,14 +179,16 @@ def lector_outlook(nombre_buzon, max_mails=50, nombre_carpeta=None):
 
 
 # ---------------------------------------------------------------- principal
-def procesar(mails, esc, con):
+def procesar(mails, esc, con, bbdd):
     ia = esc["ia"]
     nuevos = clasif = 0
     for m in mails:
         if ya_procesado(con, m["id"]):
             continue
         nuevos += 1
-        destino, motivo, _ = triaje(m, set(esc["historial"]), esc["bbdd"])
+        destino, motivo, ficha = triaje(m, set(esc["historial"]), bbdd)
+        if destino == "CIRCUITO" and ficha and ficha.get("sospecha_sucesion_bbdd"):
+            destino, motivo = "HUMANO_SUCESION", "herencia_marcada_en_bbdd"
         categoria = flags = ""
         if destino == "CIRCUITO":
             try:
@@ -205,14 +234,16 @@ if __name__ == "__main__":
     args = ap.parse_args()
     esc = cargar_escenario()
     con = log_init()
+    bbdd = BBDDConectada(esc["bbdd"])
     print("=" * 64)
     print(" FASE 1 EN OMBRA — nomes llegir i apuntar | model:", esc["ia"]["modelo"])
+    print(" Font de fitxes:", bbdd.modo)
     print("=" * 64)
     if args.informe:
         informe(con)
     elif args.outlook:
         mails = list(lector_outlook(args.outlook, args.max, args.carpeta) or [])
-        procesar(iter(mails), esc, con)
+        procesar(iter(mails), esc, con, bbdd)
         print(); informe(con)
         # Alliberar COM i sortir net (evita que la consola es quedi penjada al final)
         mails = None
@@ -221,5 +252,5 @@ if __name__ == "__main__":
         os._exit(0)
     else:
         print(f"Lector de proves: {CARPETA_PRUEBA}\n")
-        procesar(lector_carpeta(), esc, con)
+        procesar(lector_carpeta(), esc, con, bbdd)
         print(); informe(con)
