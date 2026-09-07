@@ -21,9 +21,12 @@
       "estado": "Pendiente de documentación: falta factura de compra"
     },
     "macosta@alluraypeimondt.com": {
-      "matricula": "4943FRB",
-      "titular": "Miquel Acosta",
-      "estado": "En fase de demanda presentada"
-    }
+  "matricula": "0763GCK",
+  "titular": "Gisela Ruiz Rectoret",
+  "estado": "documentación en revisión, expediente en preparación",
+  "documentacion": {"factura": "No", "contrato_compra": "No", "modelo_576": "No", "poderes": "No"},
+  "vehiculo": "OPEL CORSA",
+  "sospecha_sucesion_bbdd": false
+}
   }
 }
