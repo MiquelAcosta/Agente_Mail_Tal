@@ -211,8 +211,14 @@ if __name__ == "__main__":
     if args.informe:
         informe(con)
     elif args.outlook:
-        procesar(lector_outlook(args.outlook, args.max, args.carpeta), esc, con)
+        mails = list(lector_outlook(args.outlook, args.max, args.carpeta) or [])
+        procesar(iter(mails), esc, con)
         print(); informe(con)
+        # Alliberar COM i sortir net (evita que la consola es quedi penjada al final)
+        mails = None
+        import gc; gc.collect()
+        con.close()
+        os._exit(0)
     else:
         print(f"Lector de proves: {CARPETA_PRUEBA}\n")
         procesar(lector_carpeta(), esc, con)
