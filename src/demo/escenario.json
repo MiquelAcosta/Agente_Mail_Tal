@@ -6,7 +6,8 @@
   },
   "historial": [
     "cliente.uno@mail.com",
-    "cliente.dos@mail.com"
+    "cliente.dos@mail.com",
+    "macosta@alluraypeimondt.com"
   ],
   "bbdd": {
     "cliente.uno@mail.com": {
@@ -18,8 +19,8 @@
       "matricula": "4501KLM",
       "titular": "Cliente Dos",
       "estado": "Pendiente de documentación: falta factura de compra"
-    }
-"macosta@alluraypeimondt.com": {
+    },
+    "macosta@alluraypeimondt.com": {
       "matricula": "4943FRB",
       "titular": "Miquel Acosta",
       "estado": "En fase de demanda presentada"
