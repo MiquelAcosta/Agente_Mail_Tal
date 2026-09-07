@@ -71,6 +71,13 @@ def cargar_escenario():
     return esc
 
 
+class HistorialAbierto:
+    """Mode --real: el filtre d'historial es desactiva (identitat = fitxa BBDD).
+    L'historial real per cerca al buzon arribara amb l'ombra v2."""
+    def __contains__(self, x):
+        return True
+
+
 class BBDDConectada:
     def __init__(self, esc_bbdd):
         self.mock = esc_bbdd
@@ -174,7 +181,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             mail = {"remitente": rem, "asunto": asunto, "cuerpo": cuerpo, "adjuntos": adjuntos}
 
             print(f"\n=== {rem} | {asunto[:50]}")
-            destino, motivo, ficha = triaje(mail, set(esc["historial"]), bbdd)
+            historial = esc["historial"] if isinstance(esc["historial"], HistorialAbierto) else set(esc["historial"])
+            destino, motivo, ficha = triaje(mail, historial, bbdd)
             if destino == "CIRCUITO" and ficha and ficha.get("sospecha_sucesion_bbdd"):
                 destino, motivo = "HUMANO_SUCESION", "herencia_marcada_en_bbdd"
             categoria = flags = confianza = doc = ver_txt = respuesta = ""
@@ -253,14 +261,21 @@ if __name__ == "__main__":
     ap.add_argument("--carpeta", metavar="CARPETA", default="Tests Auto Cartel")
     ap.add_argument("--max", type=int, default=10)
     ap.add_argument("--dry", action="store_true", help="assaig: tot el proces sense crear esborranys")
+    ap.add_argument("--real", action="store_true",
+                    help="mode 100%% BBDD: fitxes nomes de la BBDD real, filtre d'historial desactivat")
     ap.add_argument("--informe", action="store_true")
     args = ap.parse_args()
     esc = cargar_escenario()
     con = log_init()
-    bbdd = BBDDConectada(esc["bbdd"])
+    if args.real:
+        esc["bbdd"] = {}   # cap fitxa de pont: nomes la BBDD real
+        esc["historial"] = HistorialAbierto()
+    bbdd = BBDDConectada(esc["bbdd"] if not args.real else {})
     print("=" * 64)
     print(" FASE 2 EN MAQUETA — esborranys | model:", esc["ia"]["modelo"])
     print(" Font de fitxes:", bbdd.modo, "| Aquest programa NO pot enviar res.")
+    if args.real:
+        print(" MODE --real: nomes BBDD real; filtre d'historial desactivat (pilot)")
     print("=" * 64)
     if args.informe:
         informe(con)
