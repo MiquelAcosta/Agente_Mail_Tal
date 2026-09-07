@@ -89,8 +89,10 @@ def lector_carpeta():
                             if lineas[2].strip().upper() == "ADJUNTO" else [])}
 
 
-def lector_outlook(nombre_buzon, max_mails=50):
-    """Lector real: ultims mails de la safata d'entrada del buzon indicat (NOMES LLEGEIX)."""
+def lector_outlook(nombre_buzon, max_mails=50, nombre_carpeta=None):
+    """Lector real: mails del buzon indicat (NOMES LLEGEIX).
+    Sense --carpeta llegeix la safata d'entrada; amb --carpeta, aquella carpeta
+    (la busca recursivament pel nom, p. ex. 'PruebasAgente')."""
     import win32com.client
     ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
     stores = [ns.Folders.Item(i + 1) for i in range(ns.Folders.Count)]
@@ -98,11 +100,28 @@ def lector_outlook(nombre_buzon, max_mails=50):
     if store is None:
         print(f"Cap buzon conte '{nombre_buzon}'. Visibles: " + ", ".join(s.Name for s in stores))
         return
-    inbox = next((store.Folders.Item(i + 1) for i in range(store.Folders.Count)
-                  if store.Folders.Item(i + 1).Name.lower() in
-                  ("bandeja de entrada", "inbox", "safata d'entrada")), None)
-    if inbox is None:
-        print(f"No trobo la safata d'entrada a '{store.Name}'."); return
+
+    def buscar(raiz, nombre):
+        for i in range(raiz.Folders.Count):
+            f = raiz.Folders.Item(i + 1)
+            if f.Name.lower() == nombre.lower():
+                return f
+            sub = buscar(f, nombre)
+            if sub:
+                return sub
+        return None
+
+    if nombre_carpeta:
+        inbox = buscar(store, nombre_carpeta)
+        if inbox is None:
+            print(f"No trobo la carpeta '{nombre_carpeta}' dins de '{store.Name}'."); return
+    else:
+        inbox = next((store.Folders.Item(i + 1) for i in range(store.Folders.Count)
+                      if store.Folders.Item(i + 1).Name.lower() in
+                      ("bandeja de entrada", "inbox", "safata d'entrada")), None)
+        if inbox is None:
+            print(f"No trobo la safata d'entrada a '{store.Name}'."); return
+    print(f"Llegint: {store.Name} > {inbox.Name}\n")
     items = inbox.Items
     items.Sort("[ReceivedTime]", True)
     n = 0
@@ -179,6 +198,8 @@ def informe(con):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--outlook", metavar="NOM", help="llegir del buzon d'Outlook que contingui NOM")
+    ap.add_argument("--carpeta", metavar="CARPETA", default=None,
+                    help="llegir aquesta carpeta del buzon en lloc de la safata d'entrada")
     ap.add_argument("--max", type=int, default=50, help="max mails a llegir d'Outlook (def. 50)")
     ap.add_argument("--informe", action="store_true", help="nomes mostrar estadistica")
     args = ap.parse_args()
@@ -190,7 +211,7 @@ if __name__ == "__main__":
     if args.informe:
         informe(con)
     elif args.outlook:
-        procesar(lector_outlook(args.outlook, args.max), esc, con)
+        procesar(lector_outlook(args.outlook, args.max, args.carpeta), esc, con)
         print(); informe(con)
     else:
         print(f"Lector de proves: {CARPETA_PRUEBA}\n")
