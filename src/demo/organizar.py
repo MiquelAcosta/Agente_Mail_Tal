@@ -29,8 +29,7 @@ from reglas import triaje, REGEX_MATRICULA
 
 RUTA_ESC = os.path.join(AQUI, "escenario.json")
 
-CARPETAS = {"DESCARTES": "0 DESCARTES", "FACIL": "1 FACIL",
-            "MEDIO": "2 MEDIO", "DIFICIL": "3 DIFICIL"}
+CARPETAS = {"DESCARTES": "0 DESCARTES", "FACIL": "1 FACIL", "DIFICIL": "2 DIFICIL"}
 
 CATEGORIAS_FACIL = {"estado_reclamacion", "confirmacion_documentacion",
                     "problema_web_subida", "informacion_general",
@@ -161,10 +160,8 @@ def calaix_de(destino, categoria, flags):
         return "DIFICIL"          # sense fitxa, successio, adjunt...
     if flags:
         return "DIFICIL"          # enfado, repregunta, cancelacio, multi-tema
-    if categoria in CATEGORIAS_FACIL:
-        return "FACIL"
-    if categoria in CATEGORIAS_MEDIO:
-        return "MEDIO"
+    if categoria in CATEGORIAS_FACIL or categoria in CATEGORIAS_MEDIO:
+        return "FACIL"            # (MEDIO fusionat a FACIL: tot porta esborrany igualment)
     return "DIFICIL"              # titularidad, contacto_llamada, ambiguo...
 
 

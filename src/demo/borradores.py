@@ -36,10 +36,23 @@ MODO_CATEGORIA = {
     "poderes_pleitos": "BORRADOR", "envio_documentacion": "BORRADOR",
 }
 
+DOMINIOS_DESCARTES_BASE = [
+    "microsoft.com", "microsoftonline.com", "office.com", "windows.com",
+    "salesforce.com", "aircall.io", "google.com", "github.com",
+    "linkedin.com", "mailchimp.com", "sendgrid.net", "amazonaws.com",
+    "atlassian.com", "zoom.us", "docusign.com", "godaddy.com",
+]
+
+
+def es_dominio_descartes(rem, dominios):
+    rem = (rem or "").lower()
+    return any(rem.endswith("@" + d) or rem.endswith("." + d) for d in dominios)
+
+
 PROMPT_CLASIFICADOR = """Eres el clasificador del buzon de atencion de una empresa de reclamaciones de vehiculos. Devuelve EXCLUSIVAMENTE un JSON valido:
 {"categoria": "<una>", "sospecha_sucesion": true|false, "cancelacion": true|false, "complejo": true|false, "repregunta_insatisfecha": true|false, "motivo": "<una frase>"}
-Categorias: estado_reclamacion, falta_factura_precio, envio_documentacion, confirmacion_documentacion, problema_web_subida, elegibilidad_vehiculo, informacion_general, coste_comision, poderes_pleitos, titularidad_caso_especial, cancelacion_desistimiento, cortesia_breve, contacto_llamada, ambiguo
-Reglas: sospecha_sucesion=true ante CUALQUIER mencion a fallecimiento/herencia/viudedad/"era cliente" (ante la duda, true). cancelacion=true si expresa voluntad de desistir. complejo=true si varias peticiones, enojo, excepciones o dudas. cortesia_breve = agradecimientos/acuses SIN peticion nueva. Nada fuera del JSON."""
+Categorias: estado_reclamacion, falta_factura_precio, envio_documentacion, confirmacion_documentacion, problema_web_subida, elegibilidad_vehiculo, informacion_general, coste_comision, poderes_pleitos, titularidad_caso_especial, cancelacion_desistimiento, cortesia_breve, contacto_llamada, fuera_de_contexto, ambiguo
+Reglas: fuera_de_contexto = el mail NO es de un cliente sobre su reclamacion (proveedores, partners, notificaciones de servicios, publicidad, temas internos). sospecha_sucesion=true ante CUALQUIER mencion a fallecimiento/herencia/viudedad/"era cliente" (ante la duda, true). cancelacion=true si expresa voluntad de desistir. complejo=true si varias peticiones, enojo, excepciones o dudas. cortesia_breve = agradecimientos/acuses SIN peticion nueva. Nada fuera del JSON."""
 
 PROMPT_REDACTOR = """Eres el redactor de respuestas del buzon de atencion de una empresa de reclamaciones de vehiculos. Tono cercano y claro, frases cortas, cero jerga juridica, en castellano. Tratamiento SIEMPRE de usted (nunca tutees). Firma SIEMPRE exactamente asi, en dos lineas finales: "Un saludo," y "El equipo de atencion".
 
@@ -310,72 +323,106 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         destino, motivo = "CIRCUITO", f"identificado_por_matricula:{mat}"
                         aviso_mat = " [PER MATRICULA: revisar titularitat]"
                         print(f"    sense fitxa per email; matricula {mat} al missatge -> FITXA LOCALITZADA (revisar titularitat)")
-            if destino == "CIRCUITO" and ficha and ficha.get("sospecha_sucesion_bbdd"):
-                destino, motivo = "HUMANO_SUCESION", "herencia_marcada_en_bbdd"
+            sucesion_bbdd = bool(ficha and ficha.get("sospecha_sucesion_bbdd"))
             categoria = flags = confianza = doc = ver_txt = respuesta = ""
             resultado = destino + " (" + motivo + ")"
+            avisos = aviso_mat
 
-            if destino == "CIRCUITO":
+            # ESTRATEGIA: BORRADOR PER A TOT, excepte adjunts, sistema i DESCARTES.
+            dominios = DOMINIOS_DESCARTES_BASE + [d.strip().lower().lstrip("@")
+                                                  for d in esc.get("dominios_descartes", [])]
+            if es_dominio_descartes(rem, dominios):
+                destino, motivo = "DESCARTE", "dominio_no_cliente"
+            sin_borrador = (destino in ("SISTEMA", "DESCARTE")) or (motivo == "adjunto_real")
+            if sin_borrador:
+                resultado = destino + f" ({motivo}) — SENSE esborrany (per disseny)"
+            else:
+                # Classificar sempre (amb o sense fitxa): la categoria tria la plantilla
                 c = llamar(ia, PROMPT_CLASIFICADOR, f"HILO: (no disponible)\n\nMENSAJE:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
                 categoria = c.get("categoria", "ambiguo")
                 flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion", "complejo",
                                               "repregunta_insatisfecha") if c.get(k))
                 print(f"    categoria: {categoria} | flags: {flags or 'ninguno'}")
+                if categoria == "fuera_de_contexto":
+                    resultado = "DESCARTE (fuera_de_contexto per IA) — SENSE esborrany"
+                    print(f"    RESULTADO -> {resultado}")
+                    con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                 categoria, flags, "", "", "", resultado, ""))
+                    con.commit()
+                    continue
                 if flags:
-                    resultado = "HUMANO (flags)"
-                elif MODO_CATEGORIA.get(categoria) is None:
-                    resultado = f"HUMANO (categoria {categoria})"
-                else:
+                    avisos += " [FLAGS: " + flags + " — revisar amb cura]"
+                if sucesion_bbdd or c.get("sospecha_sucesion"):
+                    avisos += " [SUCESSIO: to especialment curos, revisar sempre]"
+
+                # Dades: fitxa real o avis de client no identificat
+                if ficha:
                     datos = ficha_a_datos(ficha)
                     print(f"    ficha: {datos[:100]}...")
-                    print("    REDACTOR -> escribiendo...")
-                    pl = PLANTILLAS.get(categoria, {})
-                    guia = ""
-                    if pl.get("guia"):
-                        guia = f"PLANTILLA A SEGUIR: {pl['guia']}\n"
-                        for situacion, texto in pl.get("textos_aprobados", {}).items():
-                            guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
-                    red = llamar(ia, PROMPT_REDACTOR,
-                                 f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
-                                 f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
-                    confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
-                    print(f"    confianza: {confianza} | doc: {doc}")
-                    if confianza == "baja":
-                        resultado = "HUMANO (confianza baja)"
-                    else:
-                        print("    VERIFICADOR -> revisando...")
-                        ver = llamar(ia, PROMPT_VERIFICADOR,
-                                     f"DATOS VERIFICADOS: {datos}\nMENSAJE del cliente: {cuerpo}\n"
-                                     f"RESPUESTA PROPUESTA (doc: {doc}): {respuesta}", rapido=True)
-                        ver_txt = ver.get("veredicto", "")
-                        avisos = ""
-                        if ver_txt != "APROBADO":
-                            # FASE ESBORRANYS: l'esborrany es crea igualment, amb els avisos
-                            # visibles per al revisor huma. En FASE AUTOMATICA (futura),
-                            # un rebuig NO s'envia mai: derivara a huma sempre.
-                            avisos = " [AVISOS verificador: " + "; ".join(ver.get("problemas", []))[:120] + "]"
-                            print(f"    verificador amb objeccions (l'esborrany es crea igualment):{avisos}")
-                        if True:
-                            if dry:
-                                resultado = "BORRADOR (dry: no creado)" + avisos
-                            else:
-                                reply = msg.Reply()
-                                reply.Body = respuesta  # nomes el missatge generat, sense el fil citat
-                                destino_seguro = esc.get("borradores_para", "").strip()
-                                # Amb cinturo: tot va a l'adreca segura del pilot.
-                                # Sense cinturo (borradores_para buit): al CLIENT (l'extret),
-                                # no al reenviador — decisio conscient de fase 2.
-                                reply.To = destino_seguro if destino_seguro else rem
-                                reply.Save()  # <- ESBORRANY. Mai .Send()
-                                creados += 1
-                                resultado = ("BORRADOR CREADO en Outlook (per a: "
-                                             + (destino_seguro if destino_seguro else rem) + ")"
-                                             + avisos)
-                            print("    ---- RESPUESTA " + "-" * 38)
-                            for lin in respuesta.split("\n"):
-                                print(f"    | {lin}")
-                            print("    " + "-" * 53)
-            resultado += aviso_mat
+                else:
+                    datos = ("SIN FICHA EN BBDD: remitente no identificado. Posibles casos: "
+                             "cliente nuevo interesado, o cliente que escribe desde un email "
+                             "no registrado. NO afirmar nada de ningun expediente.")
+                    avisos += " [SENSE FITXA: possible client nou]"
+                    print("    sense fitxa: esborrany de client nou / peticio d'identificacio")
+
+                # Plantilla: la de la categoria; sense fitxa, la de clients nous
+                pl = PLANTILLAS.get(categoria, {})
+                guia = ""
+                if pl.get("guia"):
+                    guia = f"PLANTILLA A SEGUIR: {pl['guia']}\n"
+                    for situacion, texto in pl.get("textos_aprobados", {}).items():
+                        guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
+                if not ficha:
+                    ref = PLANTILLAS.get("_referencia_equipo_no_automatizable", {})
+                    guia += ("SITUACION SIN FICHA — elige segun el mensaje: (a) si es un interesado "
+                             "nuevo que quiere reclamar, usa este TEXTO APROBADO de alta: "
+                             + ref.get("clientes_nuevos", "") +
+                             " (b) si pregunta por un expediente existente, responde que no localizamos "
+                             "su expediente con este correo y pidele amablemente la matricula del vehiculo "
+                             "o el email con el que se registro.\n")
+                if sucesion_bbdd or c.get("sospecha_sucesion"):
+                    guia += ("SITUACION DE SUCESION: tono sobrio y humano, condolencias breves si procede, "
+                             "explicar que una persona del equipo se hara cargo personalmente de su caso "
+                             "y le contactara. NO detallar tramites ni datos del expediente.\n")
+
+                print("    REDACTOR -> escribiendo...")
+                red = llamar(ia, PROMPT_REDACTOR,
+                             f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
+                             f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
+                confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
+                print(f"    confianza: {confianza} | doc: {doc}")
+                if confianza == "baja":
+                    avisos += " [CONFIANCA BAIXA del redactor]"
+
+                print("    VERIFICADOR -> revisando...")
+                try:
+                    ver = llamar(ia, PROMPT_VERIFICADOR,
+                                 f"DATOS VERIFICADOS: {datos}\nMENSAJE del cliente: {cuerpo}\n"
+                                 f"RESPUESTA PROPUESTA (doc: {doc}): {respuesta}", rapido=True)
+                    ver_txt = ver.get("veredicto", "")
+                    if ver_txt != "APROBADO":
+                        avisos += " [VERIFICADOR: " + "; ".join(ver.get("problemas", []))[:120] + "]"
+                except Exception as e:
+                    avisos += f" [verificador no disponible: {str(e)[:40]}]"
+
+                if dry:
+                    resultado = "BORRADOR (dry: no creado)" + avisos
+                else:
+                    reply = msg.Reply()
+                    reply.Body = respuesta  # nomes el missatge generat, sense fil citat
+                    destino_seguro = esc.get("borradores_para", "").strip()
+                    reply.To = destino_seguro if destino_seguro else rem
+                    reply.Save()  # <- ESBORRANY. Mai .Send()
+                    creados += 1
+                    resultado = ("BORRADOR CREADO (per a: "
+                                 + (destino_seguro if destino_seguro else rem) + ")" + avisos)
+                print("    ---- RESPUESTA " + "-" * 38)
+                for lin in respuesta.split("\n"):
+                    print(f"    | {lin}")
+                print("    " + "-" * 53)
             print(f"    RESULTADO -> {resultado}")
             con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
