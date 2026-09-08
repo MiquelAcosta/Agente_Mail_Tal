@@ -148,15 +148,37 @@ class BBDDConectada:
             return None
 
 
-def llamar(ia, system, user):
-    payload = json.dumps({"model": ia["modelo"], "temperature": 0,
+def _llamada_cruda(ia, system, user, timeout):
+    payload = json.dumps({"model": ia["modelo"], "temperature": 0, "max_tokens": 600,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode("utf-8")
     req = urllib.request.Request(ia["base_url"].rstrip("/") + "/chat/completions", data=payload,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {ia['api_key']}"})
-    with urllib.request.urlopen(req, timeout=300) as r:
-        data = json.loads(r.read().decode("utf-8"))
-    t = data["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
-    return json.loads(t[t.find("{"):t.rfind("}") + 1], strict=False)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def llamar(ia, system, user, timeout=240):
+    """Crida amb REINTENT: si falla o expira (model descarregat), reintenta un cop."""
+    for intento in (1, 2):
+        try:
+            data = _llamada_cruda(ia, system, user, timeout)
+            t = data["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
+            return json.loads(t[t.find("{"):t.rfind("}") + 1], strict=False)
+        except Exception as e:
+            if intento == 2:
+                raise
+            print(f"    (crida fallida: {str(e)[:60]} — reintentant, el model pot estar recarregant-se...)")
+
+
+def escalfar(ia):
+    """Carrega el model abans de comencar, de manera visible i controlada."""
+    print(" Escalfant el model (la primera carrega pot trigar 1-3 min)...", flush=True)
+    try:
+        _llamada_cruda(ia, "Responde solo OK", "ping", timeout=300)
+        print(" Model carregat i llest.\n")
+    except Exception as e:
+        print(f" AVIS: no s'ha pogut escalfar el model: {str(e)[:80]}")
+        print(" Esta corrent Ollama? (ollama serve)\n")
 
 
 def log_init():
@@ -347,6 +369,7 @@ if __name__ == "__main__":
     if args.informe:
         informe(con)
     elif args.outlook:
+        escalfar(esc["ia"])
         procesar_carpeta(args.outlook, args.carpeta, esc, con, bbdd, args.dry, args.max)
         print(); informe(con)
         import gc; gc.collect()
