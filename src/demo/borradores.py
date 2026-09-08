@@ -17,6 +17,8 @@ Us (des de l'arrel del repo, amb Outlook obert):
 Registre: src\\demo\\log_borradores.sqlite (no reprocessa mails ja vistos).
 """
 import json, os, re, sys, sqlite3, urllib.request, argparse
+
+PLANTILLAS = {}
 from datetime import datetime, timezone
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -60,6 +62,19 @@ PROMPT_VERIFICADOR = """Eres el verificador final de respuestas de un buzon de a
 
 PROHIBIDO rechazar por: estilo, tono, brevedad, falta de detalle, no mencionar temas adicionales, o porque la respuesta "podria ser mejor". La respuesta la revisara ademas una persona: tu solo filtras violaciones objetivas. Si no hay ninguna de las cinco: APROBADO.
 Devuelve EXCLUSIVAMENTE: {"veredicto":"APROBADO|RECHAZADO","problemas":["..."],"riesgo":"bajo|medio|alto"}"""
+
+
+RUTA_PLANTILLAS = os.path.join(AQUI, "plantillas.json")
+
+
+def cargar_plantillas():
+    if not os.path.exists(RUTA_PLANTILLAS):
+        return {}
+    try:
+        return json.load(open(RUTA_PLANTILLAS, encoding="utf-8-sig"))
+    except Exception as e:
+        print(f"(plantillas.json no cargado: {e})")
+        return {}
 
 
 def cargar_escenario():
@@ -218,6 +233,7 @@ def ficha_a_datos(ficha):
 
 
 def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
+    global PLANTILLAS
     import win32com.client
     ia = esc["ia"]
     ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
@@ -313,8 +329,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     datos = ficha_a_datos(ficha)
                     print(f"    ficha: {datos[:100]}...")
                     print("    REDACTOR -> escribiendo...")
+                    pl = PLANTILLAS.get(categoria, {})
+                    guia = ""
+                    if pl.get("guia"):
+                        guia = f"PLANTILLA A SEGUIR: {pl['guia']}\n"
+                        for situacion, texto in pl.get("textos_aprobados", {}).items():
+                            guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
                     red = llamar(ia, PROMPT_REDACTOR,
-                                 f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n"
+                                 f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
                                  f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                     confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                     print(f"    confianza: {confianza} | doc: {doc}")
@@ -386,6 +408,7 @@ if __name__ == "__main__":
     ap.add_argument("--informe", action="store_true")
     args = ap.parse_args()
     esc = cargar_escenario()
+    PLANTILLAS.update(cargar_plantillas())
     con = log_init()
     if args.real:
         esc["bbdd"] = {}   # cap fitxa de pont: nomes la BBDD real

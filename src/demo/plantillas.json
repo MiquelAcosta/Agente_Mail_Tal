@@ -1,0 +1,63 @@
+{
+  "_ayuda": "PLANTILLES REALS DE L'EQUIP (v2). El redactor segueix el text de la situacio que coincideixi amb DATOS VERIFICADOS, adaptant salutacio i dades del client. Editar lliurement. Nota: normalitzades a tracte de VOSTE (algunes originals tutejaven; el sistema exigeix voste). Les mencions a 'adjuntamos pasos/PDF' es faran realitat quan es defineixi el cataleg complet de documents.",
+  "estado_reclamacion": {
+    "guia": "Tria el TEXT APROVAT que coincideixi amb l'Estado del expediente de DATOS VERIFICADOS i segueix-lo gairebe literal, adaptant la salutacio. Si cap situacio coincideix clarament: confianza baja. MAI donar dates concretes ni acelerar expectatives.",
+    "textos_aprobados": {
+      "si estado = completo y revisado, en espera del informe pericial": "Nos complace informarle de que su expediente se encuentra completo y correctamente revisado. En estos momentos, estamos a la espera de que el perito nos remita su informe pericial, un paso imprescindible antes de la interposicion de la demanda. Su caso esta en curso y bajo control, simplemente se encuentra en la fase tecnica de elaboracion del informe. Tan pronto como recibamos su informe, procederemos con los siguientes pasos hacia la demanda. Le mantendremos puntualmente informado/a de cualquier avance.",
+      "si estado = informe pericial completado, pendiente de demanda": "Este tipo de procesos conlleva una tramitacion rigurosa en la que cada expediente sigue una serie de fases. En su caso, el informe ya ha sido completado. La demanda aun no se ha presentado porque seguimos un orden cronologico y equitativo entre los distintos clientes. Una vez se interponga, recibira la notificacion correspondiente desde el correo procesal@alluraypeimondt.com.",
+      "si estado = documentacion en revision / expediente remitido para su tramitacion": "Su proceso continua avanzando de manera satisfactoria. Actualmente su expediente se encuentra en un ciclo de revision y verificacion exhaustiva, indispensable para asegurar que toda la documentacion este en regla y cumpla los requisitos exigidos por la ley. Asi garantizamos que, al presentar la demanda, no surjan inconvenientes que entorpezcan su tramitacion. Agradecemos su paciencia; quedamos a su disposicion.",
+      "si estado = en fase de procedimiento judicial y pregunta novedades": "Por el momento no tenemos novedades nuevas respecto al estado del procedimiento. En cuanto recibamos cualquier actualizacion por parte del Juzgado, le informaremos de inmediato.",
+      "si estado = diligencias preliminares": "Su expediente esta anotado en Diligencias Preliminares: ante la imposibilidad de disponer del documento de compra, trataremos de conseguirlo por via judicial. Si aun no ha solicitado el Modelo 576, hacerlo puede ayudar a acelerar el proceso. En cuanto tengamos novedades, le informaremos.",
+      "si no hay novedades y NO esta en demanda": "En relacion con su consulta, por el momento no hay novedades respecto a su expediente: continua en la misma etapa que le indicamos anteriormente. Las demandas se presentan conforme al orden de ingreso de los casos. Tan pronto como su demanda sea presentada, recibira un correo con toda la informacion (numero de expediente, juzgado y detalles). En cuanto se produzca cualquier avance relevante, nos pondremos en contacto con usted."
+    }
+  },
+  "falta_factura_precio": {
+    "guia": "Text aprovat de l'equip. Si el client diu explicitament que no te la factura, oferir el Modelo 576 (document D2 = pasos para solicitarlo).",
+    "textos_aprobados": {
+      "no tiene factura": "En ese caso, puede solicitar el Modelo 576 en Hacienda. En dicho documento aparece la base imponible; a partir de ahi, nosotros calculamos el IVA y obtenemos el importe realmente abonado. Le adjuntamos los pasos a seguir."
+    }
+  },
+  "coste_comision": {
+    "guia": "Seguir el text aprovat. Es l'unica categoria on SI es donen xifres, perque son les del contracte estandard aprovades per l'equip. Si el cas del client sembla especial, confianza baja.",
+    "textos_aprobados": {
+      "pregunta por costes/honorarios": "Le explicamos los posibles gastos de la reclamacion. Honorarios del despacho: cobramos un 30% + IVA (aprox. un 36%) de lo que usted recupere; reclamamos entre el 10% y el 15% del valor del vehiculo mas intereses de demora. En caso de perdida no cobrariamos nada, pero existen las costas del juicio: al tratarse de demanda acumulativa se reparten entre los demandantes (estimamos entre 100 y 200 euros por persona segun participantes, cifra no garantizada). El caso tiene alta probabilidad de exito, respaldada por sentencia del Tribunal Supremo que reconoce el cartel. Si las costas resultan favorables, compensan nuestros honorarios y usted recibiria el importe integro.",
+      "pregunta cuando cobrara": "Por el momento no podemos darle una fecha aproximada de cobro, ya que las demandas se van interponiendo por orden de clientes. En cualquier caso, le iremos informando de cualquier avance o novedad.",
+      "esta en demanda y pregunta plazos": "En este momento no podemos indicarle un plazo exacto, ya que los tiempos dependen del propio Juzgado (carga de trabajo y senyalamientos). Desde el despacho realizamos el seguimiento y las gestiones oportunas para que el procedimiento avance lo antes posible. Le iremos informando puntualmente."
+    }
+  },
+  "confirmacion_documentacion": {
+    "guia": "Nomes confirmar recepcio si DATOS VERIFICADOS ho diu. Si te documentacio pero li falten els poders (poderes: No), usar el text del apoderament.",
+    "textos_aprobados": {
+      "doc recibida pero sin poderes": "Acusamos recibo de la documentacion correctamente. Por otro lado, para poder representarle en la interposicion de la demanda necesitamos que formalice el apoderamiento apud acta: puede realizarlo online (le adjuntamos los pasos), presencialmente en el juzgado mas cercano, o por videoidentificacion (responda 'apud acta' y le enviaremos un enlace). Quedamos a su disposicion.",
+      "firmado pero falta documentacion": "Por su parte, necesitamos la siguiente documentacion: factura o contrato de compra (si no dispone de ninguno, puede solicitar el Modelo 576, le adjuntamos los pasos); ficha tecnica o permiso de circulacion; DNI por ambos lados; y el poder judicial (le adjuntamos los pasos)."
+    }
+  },
+  "poderes_pleitos": {
+    "guia": "Text aprovat de l'equip per al tramit d'apoderament.",
+    "textos_aprobados": {
+      "como realizar el apoderamiento": "Nos faltaria que realice el apoderamiento. Tiene 3 opciones: realizarlo online desde la sede judicial (le adjuntamos los pasos); presencialmente en el juzgado mas cercano; o por videoidentificacion, escribiendo 'apud acta' en respuesta a este correo y le enviaremos un enlace."
+    }
+  },
+  "problema_web_subida": {
+    "guia": "No hi ha text aprovat especific: disculpar molesties, donar 2-3 solucions (altre navegador, reduir mida de les fotos, esborrar cache) i oferir l'alternativa de enviar la documentacio responent a aquest correu.",
+    "textos_aprobados": {}
+  },
+  "informacion_general": {
+    "guia": "Explicar el proces en 3-4 frases senzilles (reclamacio del sobrepreu del cartel 2006-2013; nosaltres gestionem tot; el client aporta documentacio; se l'informa de cada avanc). Sense xifres ni terminis.",
+    "textos_aprobados": {}
+  },
+  "cortesia_breve": {
+    "guia": "Resposta minima i calida: acusar recepcio i quedar a disposicio. 2-3 frases. Res mes.",
+    "textos_aprobados": {}
+  },
+  "envio_documentacion": {
+    "guia": "NOMES agrair l'enviament si DATOS VERIFICADOS mostra documentacio rebuda; si no consta, demanar que la reenvii adjunta (mai confirmar recepcions no verificades). Indicar seguent pas: revisio per l'equip.",
+    "textos_aprobados": {}
+  },
+  "_referencia_equipo_no_automatizable": {
+    "nota": "Textos de l'equip per a situacions que el pipeline v1 deriva a persona (sense fitxa, casos M576 especials). Es guarden aqui com a referencia per a la fase de resums pre-mastegats.",
+    "clientes_nuevos": "Para poder realizar la reclamacion necesitamos: 1) Firmar la propuesta de honorarios (adjunta). 2) Otorgarnos el poder de representacion (pasos adjuntos; sin certificado digital: responder 'Apud acta' para videoidentificacion). 3) Enviar: factura de compra o comprobante del precio (o solicitar el Modelo 576), ficha tecnica o permiso de circulacion, y DNI del titular.",
+    "confusion_apoderamiento_m576": "El correo recibido no es para repetir el apoderamiento judicial: es un tramite diferente para agilizar el expediente al no disponer de la factura. Se puede solicitar el Modelo 576 (instrucciones adjuntas), otorgarnos un poder administrativo (distinto del judicial) para solicitarlo nosotros, o no hacer nada y continuar por diligencias preliminares.",
+    "dice_que_otorgo_poder_m576_y_no_consta": "No nos consta el poder administrativo necesario para solicitar el Modelo 576 (si consta el poder judicial Apud Acta, que es distinto). Confirmar si lo realizo con su propio certificado digital: si uso el de otra persona, el apoderamiento queda vinculado al DNI de esa persona."
+  }
+}

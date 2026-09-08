@@ -25,7 +25,7 @@ COLUMNAS_EMAIL = ["email_propietario", "email_registro", "email_alta",
 
 CAMPOS = """matricula, marca, modelo, nombre, apellido1, apellido2, empresa,
 tipo_titular, estado_vehiculo_ayp, estado_propietario_ayp, procedimiento,
-apto, coche_cerrado, factura, contrato_compra, modelo_576, solicitud_mod_576,
+apto, coche_cerrado, estado_perito, factura, contrato_compra, modelo_576, solicitud_mod_576,
 denegacion_modelo_576, herencia, poderes_pleitos, ha_vendido_coche,
 envio_fyg, estado_fyg, envio_minsait, estado_minsait"""
 
@@ -35,10 +35,13 @@ def _componer_estado(d):
     Retorna (frase_apta_per_a_client, detall_intern)."""
     interno = " | ".join(f"{k}={d[k]}" for k in
                          ("estado_vehiculo_ayp", "apto", "envio_fyg", "estado_fyg",
-                          "estado_minsait", "procedimiento", "coche_cerrado") if d.get(k))
+                          "estado_minsait", "procedimiento", "coche_cerrado", "estado_perito") if d.get(k))
     ev = d["estado_vehiculo_ayp"].upper()
     if d["coche_cerrado"]:
-        return "expediente cerrado", interno
+        # 'cerrado' = revisio completada (NO expedient acabat), segons plantilles de l'equip
+        if d.get("estado_perito"):
+            return "informe pericial completado, pendiente de interposición de la demanda", interno
+        return "completo y revisado, en espera del informe pericial", interno
     if d["procedimiento"]:
         return "en fase de procedimiento judicial", interno
     if d["envio_fyg"] or d["estado_fyg"]:
