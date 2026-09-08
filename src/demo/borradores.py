@@ -16,7 +16,7 @@ Us (des de l'arrel del repo, amb Outlook obert):
 --dry: fa tot el proces pero NO crea l'esborrany (assaig complet).
 Registre: src\\demo\\log_borradores.sqlite (no reprocessa mails ja vistos).
 """
-import json, os, sys, sqlite3, urllib.request, argparse
+import json, os, re, sys, sqlite3, urllib.request, argparse
 from datetime import datetime, timezone
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -69,6 +69,37 @@ def cargar_escenario():
     esc["historial"] = [h.strip().lower() for h in esc["historial"]]
     esc["bbdd"] = {k.strip().lower(): v for k, v in esc["bbdd"].items()}
     return esc
+
+
+RE_DE = re.compile(r"^\s*>?\s*(?:De|From|Von|A):?\s*(.{0,120}?)([\w.+-]+@[\w-]+(?:\.[\w-]+)+)",
+                   re.IGNORECASE | re.MULTILINE)
+
+
+def es_reenviador(rem, lista):
+    """La whitelist accepta adreces exactes ('algu@empresa.com') o dominis
+    sencers comencant per @ ('@empresa.com' = tothom del domini)."""
+    rem = (rem or "").strip().lower()
+    for entrada in lista:
+        e = entrada.strip().lower()
+        if not e:
+            continue
+        if e.startswith("@"):
+            if rem.endswith(e):
+                return True
+        elif rem == e:
+            return True
+    return False
+
+
+def extraer_cliente_de_reenvio(cuerpo):
+    """Busca al cos citat la linia 'De:/From:' del mail original i en treu l'email.
+    Nomes es crida quan el remitent real es un reenviador de confianca."""
+    for m in RE_DE.finditer(cuerpo or ""):
+        etiqueta = m.group(0).strip().lower()
+        if etiqueta.startswith(("para", "to", "a:")):
+            continue
+        return m.group(2).lower()
+    return None
 
 
 class HistorialAbierto:
@@ -178,9 +209,16 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             adjuntos = [{"nombre": str(a.FileName),
                          "is_inline": str(a.FileName).lower().startswith("image00"),
                          "bytes": getattr(a, "Size", 0)} for a in msg.Attachments]
+            reenviadores = esc.get("reenviadores", [])
+            if es_reenviador(rem, reenviadores):
+                extraido = extraer_cliente_de_reenvio(cuerpo)
+                if extraido:
+                    print(f"\n=== reenviament de {rem}")
+                    print(f"    client extret del cos: {extraido}")
+                    rem = extraido
             mail = {"remitente": rem, "asunto": asunto, "cuerpo": cuerpo, "adjuntos": adjuntos}
 
-            print(f"\n=== {rem} | {asunto[:50]}")
+            print(f"=== {rem} | {asunto[:50]}")
             historial = esc["historial"] if isinstance(esc["historial"], HistorialAbierto) else set(esc["historial"])
             destino, motivo, ficha = triaje(mail, historial, bbdd)
             if destino == "CIRCUITO" and ficha and ficha.get("sospecha_sucesion_bbdd"):
@@ -271,6 +309,8 @@ if __name__ == "__main__":
         esc["bbdd"] = {}   # cap fitxa de pont: nomes la BBDD real
         esc["historial"] = HistorialAbierto()
     bbdd = BBDDConectada(esc["bbdd"] if not args.real else {})
+    if args.real:
+        bbdd.modo = "NOMES BBDD REAL (escenario: sols configuracio)"
     print("=" * 64)
     print(" FASE 2 EN MAQUETA — esborranys | model:", esc["ia"]["modelo"])
     print(" Font de fitxes:", bbdd.modo, "| Aquest programa NO pot enviar res.")
