@@ -116,6 +116,29 @@ def fichas_por_email(email, max_fichas=5):
         cn.close()
 
 
+def fichas_por_matricula(matricula, max_fichas=3):
+    """Cerca per matricula (normalitzant espais i majuscules). Us: LOCALITZAR la
+    fitxa quan l'email falla — MAI com a autenticacio per a envio automatic."""
+    mat = (matricula or "").replace(" ", "").replace("-", "").upper()
+    if not mat:
+        return []
+    sql = (f"SELECT {CAMPOS} FROM wp_base_xam "
+           f"WHERE UPPER(REPLACE(REPLACE(TRIM(matricula),' ',''),'-','')) = %s "
+           f"LIMIT {int(max_fichas)}")
+    cn = _conexion()
+    try:
+        cur = cn.cursor(dictionary=True)
+        cur.execute(sql, [mat])
+        return [_traducir(f) for f in cur.fetchall()]
+    finally:
+        cn.close()
+
+
+def ficha_por_matricula(matricula):
+    fichas = fichas_por_matricula(matricula, max_fichas=1)
+    return fichas[0] if fichas else None
+
+
 def ficha_por_email(email):
     """Compatibilitat amb el pipeline actual: una sola fitxa (la primera) o None."""
     fichas = fichas_por_email(email, max_fichas=1)
@@ -127,7 +150,8 @@ if __name__ == "__main__":
         print("Us:  python src\\demo\\conector_bbdd.py correo@a.buscar")
         sys.exit(1)
     try:
-        fichas = fichas_por_email(sys.argv[1])
+        arg = sys.argv[1]
+        fichas = fichas_por_email(arg) if "@" in arg else fichas_por_matricula(arg)
     except FileNotFoundError:
         print(f"Falta {RUTA_CRED} amb les credencials."); sys.exit(1)
     except Exception as e:
