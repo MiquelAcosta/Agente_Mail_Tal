@@ -338,14 +338,16 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                 resultado = "BORRADOR (dry: no creado)" + avisos
                             else:
                                 reply = msg.Reply()
-                                reply.Body = respuesta + "\n\n" + reply.Body
+                                reply.Body = respuesta  # nomes el missatge generat, sense el fil citat
                                 destino_seguro = esc.get("borradores_para", "").strip()
-                                if destino_seguro:
-                                    reply.To = destino_seguro  # cinturo del pilot: mai a clients reals
+                                # Amb cinturo: tot va a l'adreca segura del pilot.
+                                # Sense cinturo (borradores_para buit): al CLIENT (l'extret),
+                                # no al reenviador — decisio conscient de fase 2.
+                                reply.To = destino_seguro if destino_seguro else rem
                                 reply.Save()  # <- ESBORRANY. Mai .Send()
                                 creados += 1
-                                resultado = ("BORRADOR CREADO en Outlook"
-                                             + (f" (destinatari forcat: {destino_seguro})" if destino_seguro else "")
+                                resultado = ("BORRADOR CREADO en Outlook (per a: "
+                                             + (destino_seguro if destino_seguro else rem) + ")"
                                              + avisos)
                             print("    ---- RESPUESTA " + "-" * 38)
                             for lin in respuesta.split("\n"):
