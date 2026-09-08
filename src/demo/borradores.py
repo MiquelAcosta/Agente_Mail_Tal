@@ -148,8 +148,8 @@ class BBDDConectada:
             return None
 
 
-def _llamada_cruda(ia, system, user, timeout):
-    payload = json.dumps({"model": ia["modelo"], "temperature": 0, "max_tokens": 600,
+def _llamada_cruda(ia, system, user, timeout, modelo=None):
+    payload = json.dumps({"model": modelo or ia["modelo"], "temperature": 0, "max_tokens": 600,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode("utf-8")
     req = urllib.request.Request(ia["base_url"].rstrip("/") + "/chat/completions", data=payload,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {ia['api_key']}"})
@@ -157,11 +157,13 @@ def _llamada_cruda(ia, system, user, timeout):
         return json.loads(r.read().decode("utf-8"))
 
 
-def llamar(ia, system, user, timeout=240):
-    """Crida amb REINTENT: si falla o expira (model descarregat), reintenta un cop."""
+def llamar(ia, system, user, timeout=240, rapido=False):
+    """Crida amb REINTENT. rapido=True usa el model 'modelo_rapido' si esta configurat
+    (per a classificador/verificador: tasques simples, model petit = mes velocitat)."""
+    modelo = ia.get("modelo_rapido") if (rapido and ia.get("modelo_rapido")) else None
     for intento in (1, 2):
         try:
-            data = _llamada_cruda(ia, system, user, timeout)
+            data = _llamada_cruda(ia, system, user, timeout, modelo=modelo)
             t = data["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
             return json.loads(t[t.find("{"):t.rfind("}") + 1], strict=False)
         except Exception as e:
@@ -179,6 +181,20 @@ def escalfar(ia):
     except Exception as e:
         print(f" AVIS: no s'ha pogut escalfar el model: {str(e)[:80]}")
         print(" Esta corrent Ollama? (ollama serve)\n")
+
+
+PROP_LAST_VERB = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+
+
+def ya_respondido(msg):
+    """True si aquest mail ja te resposta enviada des d'aquesta bustia d'Outlook.
+    Llegeix la propietat interna 'last verb' (102=respost, 103=respost a tots).
+    104 (reenviat) NO compta com a respost."""
+    try:
+        v = msg.PropertyAccessor.GetProperty(PROP_LAST_VERB)
+        return v in (102, 103)
+    except Exception:
+        return False
 
 
 def log_init():
@@ -236,6 +252,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             n += 1
             if n > max_mails:
                 break
+            if ya_respondido(msg):
+                print(f"\n=== {str(msg.Subject or '')[:50]}")
+                print("    OMES: ja te resposta enviada des d'aquesta bustia")
+                con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
+                             "", "", "", "", "", "OMITIDO (ya respondido)", ""))
+                con.commit()
+                continue
             if msg.SenderEmailType == "EX":
                 ex = msg.Sender.GetExchangeUser()
                 rem = (ex.PrimarySmtpAddress if ex else "desconocido@exchange").lower()
@@ -275,7 +300,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             resultado = destino + " (" + motivo + ")"
 
             if destino == "CIRCUITO":
-                c = llamar(ia, PROMPT_CLASIFICADOR, f"HILO: (no disponible)\n\nMENSAJE:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
+                c = llamar(ia, PROMPT_CLASIFICADOR, f"HILO: (no disponible)\n\nMENSAJE:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
                 categoria = c.get("categoria", "ambiguo")
                 flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion", "complejo",
                                               "repregunta_insatisfecha") if c.get(k))
@@ -299,7 +324,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         print("    VERIFICADOR -> revisando...")
                         ver = llamar(ia, PROMPT_VERIFICADOR,
                                      f"DATOS VERIFICADOS: {datos}\nMENSAJE del cliente: {cuerpo}\n"
-                                     f"RESPUESTA PROPUESTA (doc: {doc}): {respuesta}")
+                                     f"RESPUESTA PROPUESTA (doc: {doc}): {respuesta}", rapido=True)
                         ver_txt = ver.get("veredicto", "")
                         if ver_txt != "APROBADO":
                             resultado = "HUMANO (verificador RECHAZO: " + "; ".join(ver.get("problemas", []))[:120] + ")"

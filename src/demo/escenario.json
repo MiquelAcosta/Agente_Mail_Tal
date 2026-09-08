@@ -2,7 +2,8 @@
   "ia": {
     "base_url": "http://localhost:11434/v1",
     "api_key": "ollama",
-    "modelo": "qwen2.5:7b"
+    "modelo": "qwen2.5:7b",
+    "modelo_rapido": "qwen2.5:3b"
   },
   "borradores_para": "macosta@alluraypeimondt.com",
   "reenviadores": ["@alluraypeimondt.com", "@allura.com", "@recuperatudinero.com"],
