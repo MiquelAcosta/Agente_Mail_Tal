@@ -4,29 +4,8 @@
     "api_key": "ollama",
     "modelo": "qwen2.5:7b"
   },
-  "historial": [
-    "cliente.uno@mail.com",
-    "cliente.dos@mail.com",
-    "macosta@alluraypeimondt.com"
-  ],
-  "bbdd": {
-    "cliente.uno@mail.com": {
-      "matricula": "2717GJD",
-      "titular": "Cliente Uno",
-      "estado": "En fase de demanda presentada"
-    },
-    "cliente.dos@mail.com": {
-      "matricula": "4501KLM",
-      "titular": "Cliente Dos",
-      "estado": "Pendiente de documentación: falta factura de compra"
-    },
-    "macosta@alluraypeimondt.com": {
-  "matricula": "0763GCK",
-  "titular": "Gisela Ruiz Rectoret",
-  "estado": "documentación en revisión, expediente en preparación",
-  "documentacion": {"factura": "No", "contrato_compra": "No", "modelo_576": "No", "poderes": "No"},
-  "vehiculo": "OPEL CORSA",
-  "sospecha_sucesion_bbdd": false
-}
-  }
+  "borradores_para": "macosta@alluraypeimondt.com",
+  "reenviadores": ["@alluraypeimondt.com", "@allura.com", "@recuperatudinero.com"],
+  "historial": [],
+  "bbdd": {}
 }
