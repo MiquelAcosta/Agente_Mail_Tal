@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(AQUI, "..", "triaje"))
 sys.path.insert(0, AQUI)
-from reglas import triaje
+from reglas import triaje, REGEX_MATRICULA
 
 RUTA_ESC = os.path.join(AQUI, "escenario.json")
 
@@ -52,6 +52,37 @@ Categorias: estado_reclamacion, falta_factura_precio, envio_documentacion, confi
 Reglas: fuera_de_contexto = el mail NO es de un cliente sobre su reclamacion (proveedores, partners comerciales, notificaciones de servicios, publicidad, temas internos de empresa). sospecha_sucesion=true ante CUALQUIER mencion a fallecimiento/herencia/viudedad (ante la duda, true). cancelacion=true si expresa voluntad de desistir. complejo=true si varias peticiones, enojo, excepciones o dudas. cortesia_breve = agradecimientos SIN peticion nueva. Nada fuera del JSON."""
 
 
+import re
+RE_DE = re.compile(r"^\s*>?\s*(?:De|From|Von|A):?\s*(.{0,120}?)([\w.+-]+@[\w-]+(?:\.[\w-]+)+)",
+                   re.IGNORECASE | re.MULTILINE)
+
+
+def es_reenviador(rem, lista):
+    rem = (rem or "").strip().lower()
+    for entrada in lista:
+        e = entrada.strip().lower()
+        if not e:
+            continue
+        if e.startswith("@"):
+            if rem.endswith(e):
+                return True
+        elif rem == e:
+            return True
+    return False
+
+
+def extraer_cliente_de_reenvio(cuerpo, internos=()):
+    for m in RE_DE.finditer(cuerpo or ""):
+        etiqueta = m.group(0).strip().lower()
+        if etiqueta.startswith(("para", "to", "a:")):
+            continue
+        email = m.group(2).lower()
+        if es_reenviador(email, internos):
+            continue
+        return email
+    return None
+
+
 def cargar_escenario():
     esc = json.load(open(RUTA_ESC, encoding="utf-8-sig"))
     esc["historial"] = [h.strip().lower() for h in esc["historial"]]
@@ -64,10 +95,12 @@ class BBDDConectada:
         self.mock = esc_bbdd
         self.modo = "escenario.json"
         self._real = None
+        self._real_mat = None
         if os.path.exists(os.path.join(AQUI, "credenciales.json")):
             try:
-                from conector_bbdd import ficha_por_email
+                from conector_bbdd import ficha_por_email, ficha_por_matricula
                 self._real = ficha_por_email
+                self._real_mat = ficha_por_matricula
                 self.modo = "BBDD REAL"
             except Exception as e:
                 print(f"(Connector BBDD no carregat: {e})")
@@ -81,6 +114,14 @@ class BBDDConectada:
             except Exception as e:
                 print(f"  (avis BBDD: {str(e)[:60]})")
         return self.mock.get(email, default)
+
+    def por_matricula(self, matricula):
+        if self._real_mat is None:
+            return None
+        try:
+            return self._real_mat(matricula)
+        except Exception:
+            return None
 
 
 class HistorialAbierto:
@@ -192,11 +233,24 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                          "bytes": getattr(a, "Size", 0)} for a in msg.Attachments]
             mail = {"remitente": rem, "asunto": asunto, "cuerpo": cuerpo, "adjuntos": adjuntos}
 
+            reenviadores = esc.get("reenviadores", [])
+            if es_reenviador(rem, reenviadores):
+                extraido = extraer_cliente_de_reenvio(cuerpo, internos=reenviadores)
+                if extraido:
+                    rem = extraido
+                    mail["remitente"] = rem
             categoria = flags = ""
             if es_dominio_descartes(rem, dominios):
                 destino, motivo = "SISTEMA", "dominio_no_cliente"
             else:
                 destino, motivo, ficha = triaje(mail, HistorialAbierto(), bbdd)
+                if destino == "HUMANO" and motivo == "sin_ficha_bbdd":
+                    m_mat = REGEX_MATRICULA.search((asunto + " " + cuerpo).upper())
+                    if m_mat:
+                        f_mat = bbdd.por_matricula(m_mat.group(0).replace(" ", ""))
+                        if f_mat:
+                            ficha = f_mat
+                            destino, motivo = "CIRCUITO", "identificado_por_matricula"
                 if destino == "CIRCUITO" and ficha and ficha.get("sospecha_sucesion_bbdd"):
                     destino, motivo = "HUMANO_SUCESION", "herencia_en_bbdd"
                 if destino == "CIRCUITO":
