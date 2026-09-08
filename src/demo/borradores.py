@@ -51,14 +51,14 @@ Reglas INQUEBRANTABLES:
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
 
-PROMPT_VERIFICADOR = """Eres el verificador final de respuestas automaticas de un buzon de atencion. Comprueba en orden:
-1. Todo dato concreto de la RESPUESTA (fases, fechas, importes, referencias) aparece en DATOS VERIFICADOS o en el MENSAJE del cliente.
-2. No menciona a terceras personas ni otros expedientes.
-3. No promete plazos ni resultados no verificados.
-4. Documento adjunto: SOLO es valido si el cliente lo PIDE explicitamente en su mensaje (D1 solo si pregunta como funciona el proceso; D2 solo si dice no tener factura). Si hay documento adjunto sin peticion explicita del cliente: RECHAZADO.
-5. Tratamiento de usted en todo el texto (si tutea: RECHAZADO) y firma como "El equipo de atencion".
-6. Tono adecuado y responde a lo que se pregunta.
-Ante cualquier duda razonable: RECHAZADO (un rechazo solo cuesta revision humana; una aprobacion erronea llega a un cliente).
+PROMPT_VERIFICADOR = """Eres el verificador final de respuestas de un buzon de atencion. Tu UNICA mision es detectar VIOLACIONES OBJETIVAS. Rechaza SOLO si ocurre alguna de estas cinco:
+1. INVENCION: la respuesta afirma un dato concreto (fase, fecha, importe, referencia, recepcion de documentos) que NO aparece en DATOS VERIFICADOS ni en el MENSAJE del cliente.
+2. TERCEROS: menciona a otras personas u otros expedientes.
+3. PROMESAS: compromete plazos o resultados que no estan en DATOS VERIFICADOS.
+4. DOCUMENTO NO PEDIDO: adjunta D1 o D2 sin que el cliente lo haya pedido explicitamente (D1 solo si pregunta como funciona el proceso; D2 solo si dice no tener factura).
+5. TUTEO: trata al cliente de tu en lugar de usted.
+
+PROHIBIDO rechazar por: estilo, tono, brevedad, falta de detalle, no mencionar temas adicionales, o porque la respuesta "podria ser mejor". La respuesta la revisara ademas una persona: tu solo filtras violaciones objetivas. Si no hay ninguna de las cinco: APROBADO.
 Devuelve EXCLUSIVAMENTE: {"veredicto":"APROBADO|RECHAZADO","problemas":["..."],"riesgo":"bajo|medio|alto"}"""
 
 
@@ -149,7 +149,7 @@ class BBDDConectada:
 
 
 def _llamada_cruda(ia, system, user, timeout, modelo=None):
-    payload = json.dumps({"model": modelo or ia["modelo"], "temperature": 0, "max_tokens": 600,
+    payload = json.dumps({"model": modelo or ia["modelo"], "temperature": 0, "max_tokens": 400,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode("utf-8")
     req = urllib.request.Request(ia["base_url"].rstrip("/") + "/chat/completions", data=payload,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {ia['api_key']}"})
@@ -267,7 +267,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             else:
                 rem = (msg.SenderEmailAddress or "desconocido").lower()
             asunto = str(msg.Subject or "")
-            cuerpo = str(msg.Body or "")[:5000]
+            cuerpo = str(msg.Body or "")[:2500]
             adjuntos = [{"nombre": str(a.FileName),
                          "is_inline": str(a.FileName).lower().startswith("image00"),
                          "bytes": getattr(a, "Size", 0)} for a in msg.Attachments]
@@ -326,11 +326,16 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                      f"DATOS VERIFICADOS: {datos}\nMENSAJE del cliente: {cuerpo}\n"
                                      f"RESPUESTA PROPUESTA (doc: {doc}): {respuesta}", rapido=True)
                         ver_txt = ver.get("veredicto", "")
+                        avisos = ""
                         if ver_txt != "APROBADO":
-                            resultado = "HUMANO (verificador RECHAZO: " + "; ".join(ver.get("problemas", []))[:120] + ")"
-                        else:
+                            # FASE ESBORRANYS: l'esborrany es crea igualment, amb els avisos
+                            # visibles per al revisor huma. En FASE AUTOMATICA (futura),
+                            # un rebuig NO s'envia mai: derivara a huma sempre.
+                            avisos = " [AVISOS verificador: " + "; ".join(ver.get("problemas", []))[:120] + "]"
+                            print(f"    verificador amb objeccions (l'esborrany es crea igualment):{avisos}")
+                        if True:
                             if dry:
-                                resultado = "BORRADOR (dry: no creado)"
+                                resultado = "BORRADOR (dry: no creado)" + avisos
                             else:
                                 reply = msg.Reply()
                                 reply.Body = respuesta + "\n\n" + reply.Body
@@ -340,7 +345,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                 reply.Save()  # <- ESBORRANY. Mai .Send()
                                 creados += 1
                                 resultado = ("BORRADOR CREADO en Outlook"
-                                             + (f" (destinatari forcat: {destino_seguro})" if destino_seguro else ""))
+                                             + (f" (destinatari forcat: {destino_seguro})" if destino_seguro else "")
+                                             + avisos)
                             print("    ---- RESPUESTA " + "-" * 38)
                             for lin in respuesta.split("\n"):
                                 print(f"    | {lin}")
