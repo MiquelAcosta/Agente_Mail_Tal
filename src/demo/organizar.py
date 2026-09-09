@@ -150,18 +150,20 @@ def es_dominio_descartes(rem, dominios):
     return any(rem.endswith("@" + d) or rem.endswith("." + d) for d in dominios)
 
 
-def calaix_de(destino, categoria, flags):
-    """Regla de repartiment: de la decisio del sistema al calaix de la safata."""
-    if categoria == "fuera_de_contexto":
+def calaix_de(destino, categoria, flags, motivo=""):
+    """Regla de repartiment AMPLIADA: FACIL = tot el que te resposta clara de
+    plantilla (candidats al futur enviament automatic). DIFICIL = el que demana
+    ull huma de veritat: adjunts, successions, cancelacions, enfados, ambigus."""
+    if categoria == "fuera_de_contexto" or destino in ("SISTEMA", "DESCARTE"):
         return "DESCARTES"
-    if destino == "SISTEMA":
-        return "DESCARTES"
-    if destino != "CIRCUITO":
-        return "DIFICIL"          # sense fitxa, successio, adjunt...
+    if motivo == "adjunto_real" or destino == "HUMANO_SUCESION":
+        return "DIFICIL"
     if flags:
-        return "DIFICIL"          # enfado, repregunta, cancelacio, multi-tema
+        return "DIFICIL"          # sucesion/cancelacio/enfado/repregunta: persona
+    if motivo == "sin_ficha_bbdd":
+        return "FACIL"            # client nou o peticio d'identificacio: plantilla fixa
     if categoria in CATEGORIAS_FACIL or categoria in CATEGORIAS_MEDIO:
-        return "FACIL"            # (MEDIO fusionat a FACIL: tot porta esborrany igualment)
+        return "FACIL"
     return "DIFICIL"              # titularidad, contacto_llamada, ambiguo...
 
 
@@ -250,7 +252,7 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                             destino, motivo = "CIRCUITO", "identificado_por_matricula"
                 if destino == "CIRCUITO" and ficha and ficha.get("sospecha_sucesion_bbdd"):
                     destino, motivo = "HUMANO_SUCESION", "herencia_en_bbdd"
-                if destino == "CIRCUITO":
+                if destino == "CIRCUITO" or motivo == "sin_ficha_bbdd":
                     c = llamar(ia, PROMPT_CLASIFICADOR,
                                f"MENSAJE:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                     categoria = c.get("categoria", "ambiguo")
@@ -258,7 +260,7 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                         categoria = "ambiguo"  # client amb fitxa mai es descarte
                     flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion",
                                                   "complejo", "repregunta_insatisfecha") if c.get(k))
-            calaix = calaix_de(destino, categoria, flags)
+            calaix = calaix_de(destino, categoria, flags, motivo)
             recuento[calaix] += 1
             print(f"  {rem[:34]:34} -> {CARPETAS[calaix]:12} ({categoria or motivo}{' ['+flags+']' if flags else ''})")
             movido = 0
