@@ -52,7 +52,7 @@ def es_dominio_descartes(rem, dominios):
 PROMPT_CLASIFICADOR = """Eres el clasificador del buzon de atencion de una empresa de reclamaciones de vehiculos. Devuelve EXCLUSIVAMENTE un JSON valido:
 {"categoria": "<una>", "sospecha_sucesion": true|false, "cancelacion": true|false, "complejo": true|false, "repregunta_insatisfecha": true|false, "motivo": "<una frase>"}
 Categorias: estado_reclamacion, falta_factura_precio, envio_documentacion, confirmacion_documentacion, problema_web_subida, elegibilidad_vehiculo, informacion_general, coste_comision, poderes_pleitos, titularidad_caso_especial, cancelacion_desistimiento, cortesia_breve, contacto_llamada, fuera_de_contexto, ambiguo
-Reglas: fuera_de_contexto = el mail NO es de un cliente sobre su reclamacion (proveedores, partners, notificaciones de servicios, publicidad, temas internos). sospecha_sucesion=true ante CUALQUIER mencion a fallecimiento/herencia/viudedad/"era cliente" (ante la duda, true). cancelacion=true si expresa voluntad de desistir. complejo=true si varias peticiones, enojo, excepciones o dudas. cortesia_breve = agradecimientos/acuses SIN peticion nueva. Nada fuera del JSON."""
+Reglas: fuera_de_contexto = SOLO cuando el mensaje claramente NO tiene NINGUNA relacion con reclamaciones, coches, expedientes, documentacion o clientes (ej: publicidad, notificaciones de software, temas internos de oficina). OJO: los mails reenviados llevan cabeceras De:/Para: internas — IGNORALAS, juzga solo el contenido del mensaje del cliente. Si menciona reclamacion, expediente, coche, cartel, factura, demanda o documentacion: NUNCA fuera_de_contexto. Ante la duda: ambiguo, no fuera_de_contexto. sospecha_sucesion=true ante CUALQUIER mencion a fallecimiento/herencia/viudedad/"era cliente" (ante la duda, true). cancelacion=true si expresa voluntad de desistir. complejo=true si varias peticiones, enojo, excepciones o dudas. cortesia_breve = agradecimientos/acuses SIN peticion nueva. Nada fuera del JSON."""
 
 PROMPT_REDACTOR = """Eres el redactor de respuestas del buzon de atencion de una empresa de reclamaciones de vehiculos. Tono cercano y claro, frases cortas, cero jerga juridica, en castellano. Tratamiento SIEMPRE de usted (nunca tutees). Firma SIEMPRE exactamente asi, en dos lineas finales: "Un saludo," y "El equipo de atencion".
 
@@ -343,6 +343,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion", "complejo",
                                               "repregunta_insatisfecha") if c.get(k))
                 print(f"    categoria: {categoria} | flags: {flags or 'ninguno'}")
+                if categoria == "fuera_de_contexto" and ficha:
+                    # XARXA: un client identificat a la BBDD mai es descarte
+                    print("    (fuera_de_contexto ignorat: el remitent TE fitxa -> es tracta com ambiguo)")
+                    categoria = "ambiguo"
                 if categoria == "fuera_de_contexto":
                     resultado = "DESCARTE (fuera_de_contexto per IA) — SENSE esborrany"
                     print(f"    RESULTADO -> {resultado}")

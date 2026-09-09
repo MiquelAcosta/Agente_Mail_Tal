@@ -254,6 +254,8 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                     c = llamar(ia, PROMPT_CLASIFICADOR,
                                f"MENSAJE:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                     categoria = c.get("categoria", "ambiguo")
+                    if categoria == "fuera_de_contexto" and ficha:
+                        categoria = "ambiguo"  # client amb fitxa mai es descarte
                     flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion",
                                                   "complejo", "repregunta_insatisfecha") if c.get(k))
             calaix = calaix_de(destino, categoria, flags)
