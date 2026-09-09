@@ -241,7 +241,7 @@ def _llamada_cruda(ia, system, user, timeout, modelo=None):
         return json.loads(r.read().decode("utf-8"))
 
 
-def llamar(ia, system, user, timeout=240, rapido=False):
+def llamar(ia, system, user, timeout=480, rapido=False):
     """Crida amb REINTENT. rapido=True usa el model 'modelo_rapido' si esta configurat
     (per a classificador/verificador: tasques simples, model petit = mes velocitat)."""
     modelo = ia.get("modelo_rapido") if (rapido and ia.get("modelo_rapido")) else None
@@ -441,7 +441,11 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                "concretos de su ficha. No reescribas ni resumas."
                                if pl.get("literal") else "PLANTILLA A SEGUIR (adapta con naturalidad):")
                     guia = f"{modo_pl} {pl['guia']}\n"
-                    for situacion, texto in pl.get("textos_aprobados", {}).items():
+                    textos = pl.get("textos_aprobados", {})
+                    # dieta: si alguna variant coincideix amb l'estat de la fitxa, injectar NOMES aquella
+                    coincidentes = {s: t for s, t in textos.items()
+                                    if s.replace("si estado = ", "")[:28].lower() in datos.lower()}
+                    for situacion, texto in (coincidentes or textos).items():
                         guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
                 if not ficha:
                     ref = PLANTILLAS.get("_referencia_equipo_no_automatizable", {})
@@ -465,15 +469,18 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if confianza == "baja":
                     avisos += " [CONFIANCA BAIXA del redactor]"
 
-                print("    VERIFICADOR -> revisando...")
-                try:
+                if str(esc.get("verificador", "on")).lower() in ("off", "no", "false", "0"):
+                    ver_txt = "OMITIDO"
+                else:
+                  print("    VERIFICADOR -> revisando...")
+                  try:
                     ver = llamar(ia, PROMPT_VERIFICADOR,
                                  f"DATOS VERIFICADOS: {datos}\nMENSAJE del cliente: {cuerpo}\n"
                                  f"RESPUESTA PROPUESTA (doc: {doc}): {respuesta}", rapido=True)
                     ver_txt = ver.get("veredicto", "")
                     if ver_txt != "APROBADO":
                         avisos += " [VERIFICADOR: " + "; ".join(ver.get("problemas", []))[:120] + "]"
-                except Exception as e:
+                  except Exception as e:
                     avisos += f" [verificador no disponible: {str(e)[:40]}]"
 
                 if dry:
