@@ -64,6 +64,7 @@ Reglas INQUEBRANTABLES:
    Catalogo: D1 = Instructivo general del proceso (solo si pregunta como funciona el proceso). D2 = Guia de documentacion alternativa a la factura (solo si dice que no tiene o no encuentra la factura).
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
 5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones.
+6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
 
@@ -451,7 +452,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              "su expediente con este correo y pidele amablemente la matricula del vehiculo "
                              "o el email con el que se registro.\n")
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
-                    guia += ("SITUACION DE SUCESION: tono sobrio y humano, condolencias breves si procede, "
+                    guia += ("SITUACION DE SUCESION: saludo formal (Estimado/a senyor/a o Buenos dias; NUNCA Querido/a), tono sobrio y humano, condolencias breves si procede, "
                              "explicar que una persona del equipo se hara cargo personalmente de su caso "
                              "y le contactara. NO detallar tramites ni datos del expediente.\n")
 
