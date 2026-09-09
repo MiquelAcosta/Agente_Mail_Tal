@@ -19,6 +19,7 @@ Registre: src\\demo\\log_borradores.sqlite (no reprocessa mails ja vistos).
 import json, os, re, sys, sqlite3, urllib.request, argparse
 
 PLANTILLAS = {}
+TABLA_CARTEL = {}
 from datetime import datetime, timezone
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -78,6 +79,60 @@ Devuelve EXCLUSIVAMENTE: {"veredicto":"APROBADO|RECHAZADO","problemas":["..."],"
 
 
 RUTA_PLANTILLAS = os.path.join(AQUI, "plantillas.json")
+RUTA_TABLA_CARTEL = os.path.join(AQUI, "tabla_cartel.json")
+RE_ANYO = re.compile(r"\b(19[6-9]\d|20[0-2]\d)\b")
+MESES = {"enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+         "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
+         "noviembre": 11, "diciembre": 12, "gener": 1, "febrer": 2, "marc": 3,
+         "maig": 5, "juny": 6, "juliol": 7, "setembre": 9, "novembre": 11, "desembre": 12}
+
+
+def cargar_tabla_cartel():
+    if not os.path.exists(RUTA_TABLA_CARTEL):
+        return {}
+    try:
+        return json.load(open(RUTA_TABLA_CARTEL, encoding="utf-8-sig"))["marcas"]
+    except Exception:
+        return {}
+
+
+def comprobar_cartel(texto, tabla):
+    """Comprovacio deterministica oficial: marca mencionada + any de matriculacio.
+    Retorna una linia per a DATOS VERIFICADOS, o cap si no hi ha prou dades."""
+    if not tabla:
+        return ""
+    t = " " + texto.upper() + " "
+    marca = next((m for m in tabla if " " + m + " " in t or t.count(m) > 0), None)
+    if not marca:
+        return ""
+    anyos = [int(a) for a in RE_ANYO.findall(texto)]
+    anyo = next((a for a in anyos if 1990 <= a <= 2025), None)
+    ini, fin = tabla[marca]
+    a_ini, a_fin = int(ini[:4]), int(fin[:4])
+    if anyo is None:
+        return (f"COMPROBACION CARTEL: la marca {marca} SI esta en la tabla de marcas afectadas "
+                f"(periodo {ini[8:]}/{ini[5:7]}/{ini[:4]} a {fin[8:]}/{fin[5:7]}/{fin[:4]}), pero el cliente no indica "
+                f"el anyo de matriculacion: pedirselo para confirmar la viabilidad.")
+    if a_ini > a_fin:  # rangs impossibles (TWINGO/DAIMLER): mai viable
+        return f"COMPROBACION CARTEL: {marca} matriculado en {anyo}: NO viable segun la tabla oficial."
+    mes = next((v for k, v in MESES.items() if k in texto.lower()), None)
+    if mes and anyo in (a_ini, a_fin):
+        dentro = (anyo, mes) >= (a_ini, int(ini[5:7])) and (anyo, mes) <= (a_fin, int(fin[5:7]))
+        if dentro:
+            return (f"COMPROBACION CARTEL: {marca} matriculado en {mes:02d}/{anyo}: DENTRO del periodo del cartel "
+                    f"({ini[8:]}/{ini[5:7]}/{ini[:4]} a {fin[8:]}/{fin[5:7]}/{fin[:4]}): VIABLE por marca y fecha "
+                    f"(pendiente de verificar compra nueva en Espana).")
+        return (f"COMPROBACION CARTEL: {marca} matriculado en {mes:02d}/{anyo}: FUERA del periodo del cartel "
+                f"({ini[8:]}/{ini[5:7]}/{ini[:4]} a {fin[8:]}/{fin[5:7]}/{fin[:4]}): NO viable por fecha.")
+    if a_ini < anyo < a_fin:
+        return (f"COMPROBACION CARTEL: {marca} matriculado en {anyo}: DENTRO del periodo del cartel "
+                f"({ini[:4]}-{fin[:4]}): VIABLE por marca y fecha (pendiente de verificar compra nueva en Espana).")
+    if anyo == a_ini or anyo == a_fin:
+        return (f"COMPROBACION CARTEL: {marca} matriculado en {anyo}: el anyo esta EN EL LIMITE del periodo "
+                f"({ini[8:]}/{ini[5:7]}/{ini[:4]} a {fin[8:]}/{fin[5:7]}/{fin[:4]}): depende del mes exacto; "
+                f"pedir mes de matriculacion o documentacion antes de confirmar.")
+    return (f"COMPROBACION CARTEL: {marca} matriculado en {anyo}: FUERA del periodo del cartel "
+            f"({ini[:4]}-{fin[:4]}): NO viable por fecha.")
 
 
 def cargar_plantillas():
@@ -362,6 +417,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     avisos += " [SUCESSIO: to especialment curos, revisar sempre]"
 
                 # Dades: fitxa real o avis de client no identificat
+                cartel_info = comprobar_cartel(asunto + " " + cuerpo, TABLA_CARTEL)
                 if ficha:
                     datos = ficha_a_datos(ficha)
                     print(f"    ficha: {datos[:100]}...")
@@ -371,12 +427,19 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              "no registrado. NO afirmar nada de ningun expediente.")
                     avisos += " [SENSE FITXA: possible client nou]"
                     print("    sense fitxa: esborrany de client nou / peticio d'identificacio")
+                if cartel_info:
+                    datos += " · " + cartel_info
+                    print(f"    {cartel_info[:90]}...")
 
                 # Plantilla: la de la categoria; sense fitxa, la de clients nous
                 pl = PLANTILLAS.get(categoria, {})
                 guia = ""
                 if pl.get("guia"):
-                    guia = f"PLANTILLA A SEGUIR: {pl['guia']}\n"
+                    modo_pl = ("COPIA CASI LITERAL: usa el texto aprobado que coincida TAL CUAL, "
+                               "cambiando unicamente el saludo con el nombre del cliente y los datos "
+                               "concretos de su ficha. No reescribas ni resumas."
+                               if pl.get("literal") else "PLANTILLA A SEGUIR (adapta con naturalidad):")
+                    guia = f"{modo_pl} {pl['guia']}\n"
                     for situacion, texto in pl.get("textos_aprobados", {}).items():
                         guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
                 if not ficha:
@@ -460,6 +523,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     esc = cargar_escenario()
     PLANTILLAS.update(cargar_plantillas())
+    TABLA_CARTEL.update(cargar_tabla_cartel())
     con = log_init()
     if args.real:
         esc["bbdd"] = {}   # cap fitxa de pont: nomes la BBDD real
