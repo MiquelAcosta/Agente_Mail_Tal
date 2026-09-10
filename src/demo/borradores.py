@@ -537,6 +537,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             if sin_borrador:
                 resultado = destino + f" ({motivo}) — SENSE esborrany (per disseny)"
             else:
+                # Historial real del buzon amb aquest client (abans de classificar: el fa servir)
+                hilo_txt = buscar_historial(inbox, enviados, rem) or "(sin historial en el buzon)"
+                if "(sin historial" not in hilo_txt:
+                    print(f"    historial del buzon: {hilo_txt.count(chr(10)) + 1} missatges previs trobats")
                 # Classificar sempre (amb o sense fitxa): la categoria tria la plantilla
                 c = llamar(ia, PROMPT_CLASIFICADOR, f"HISTORIAL PREVIO con este cliente:\n{hilo_txt}\n\nMENSAJE ACTUAL:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
                 categoria = c.get("categoria", "ambiguo")
@@ -561,10 +565,6 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
                     avisos += " [SUCESSIO: to especialment curos, revisar sempre]"
 
-                # Historial real del buzon amb aquest client (rebuts + respostes nostres)
-                hilo_txt = buscar_historial(inbox, enviados, rem) or "(sin historial en el buzon)"
-                if hilo_txt != "(sin historial en el buzon)":
-                    print(f"    historial del buzon: {hilo_txt.count(chr(10)) + 1} missatges previs trobats")
                 # Dades: fitxa real o avis de client no identificat
                 cartel_info = comprobar_cartel(asunto + " " + cuerpo, TABLA_CARTEL)
                 if ficha:
@@ -781,4 +781,4 @@ if __name__ == "__main__":
         con.close()
         os._exit(0)
     else:
-        print("Cal --outlook \"NOM\" (i opcionalment --carpeta, --dry, --max).")
+        print("Cal --outlook \"NOM\" (i opcionalment --carpeta, --dry, --max).")g
