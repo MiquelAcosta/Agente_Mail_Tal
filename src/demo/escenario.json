@@ -6,6 +6,16 @@
   },
   "borradores_para": "macosta@alluraypeimondt.com",
   "reenviadores": ["@alluraypeimondt.com", "@allura.com", "@recuperatudinero.com"],
+  "verificador": "off",
+  "solo_no_leidos": "no",
+  "agente": {
+    "buzon": "integracion",
+    "carpeta_entrada": "Tests Auto Cartel",
+    "intervalo_minutos": 5,
+    "hora_inicio": 8,
+    "hora_fin": 19,
+    "fines_de_semana": true
+  },
   "historial": [],
   "bbdd": {}
 }
