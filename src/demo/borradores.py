@@ -65,7 +65,8 @@ Reglas INQUEBRANTABLES:
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
 5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones.
 6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
-7. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
+7. Si en DATOS VERIFICADOS la documentacion del expediente muestra elementos en "No" que frenan el avance (factura, contrato, poderes), anade UNA linea cordial recordando ese pendiente e invitando a enviarlo respondiendo a este correo (sin presionar).
+8. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
 
@@ -207,6 +208,11 @@ class BBDDConectada:
         if os.path.exists(os.path.join(AQUI, "credenciales.json")):
             try:
                 from conector_bbdd import ficha_por_email, ficha_por_matricula
+                try:
+                    from conector_bbdd import ficha_por_telefono
+                    self._real_tel = ficha_por_telefono
+                except Exception:
+                    self._real_tel = None
                 self._real = ficha_por_email
                 self._real_mat = ficha_por_matricula
                 self.modo = "BBDD REAL (+ escenario de reserva)"
@@ -222,6 +228,15 @@ class BBDDConectada:
             except Exception as e:
                 print(f"  (avis: BBDD real ha fallat: {str(e)[:70]} — provant escenari)")
         return self.mock.get(email, default)
+
+    def por_telefono(self, telefono):
+        if getattr(self, "_real_tel", None) is None:
+            return None
+        try:
+            return self._real_tel(telefono)
+        except Exception as e:
+            print(f"  (avis: cerca per telefon ha fallat: {str(e)[:60]})")
+            return None
 
     def por_matricula(self, matricula):
         if self._real_mat is None:
@@ -438,6 +453,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         destino, motivo = "CIRCUITO", f"identificado_por_matricula:{mat}"
                         aviso_mat = " [PER MATRICULA: revisar titularitat]"
                         print(f"    sense fitxa per email; matricula {mat} al missatge -> FITXA LOCALITZADA (revisar titularitat)")
+            if destino == "HUMANO" and motivo == "sin_ficha_bbdd":
+                m_tel = re.search(r"\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b", asunto + " " + cuerpo)
+                if m_tel:
+                    f_tel = bbdd.por_telefono(m_tel.group(0))
+                    if f_tel:
+                        ficha = f_tel
+                        destino, motivo = "CIRCUITO", "identificado_por_telefono"
+                        aviso_mat = " [PER TELEFON: revisar identitat]"
+                        print(f"    sense fitxa per email; telefon al missatge -> FITXA LOCALITZADA (revisar identitat)")
             sucesion_bbdd = bool(ficha and ficha.get("sospecha_sucesion_bbdd"))
             categoria = flags = confianza = doc = ver_txt = respuesta = ""
             resultado = destino + " (" + motivo + ")"
@@ -514,19 +538,36 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     pide_expediente = any(k in t_low for k in
                         ("mi expediente", "mi reclamacion", "mi reclamación", "mi caso",
                          "como va", "cómo va", "estado de mi", "mi demanda"))
-                    no_viable = ("NO viable" in cartel_info)
                     if pide_expediente:
                         respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. No localizamos "
                             "ningún expediente asociado a esta dirección de correo. Para poder ayudarle, "
                             "¿puede indicarnos la matrícula del vehículo o el correo electrónico con el "
                             "que se registró?\n\nUn saludo,\nEl equipo de atención")
                         avisos += " [PLANTILLA FIXA: peticio d'identificacio]"
-                    elif not no_viable:
+                    elif "VIABLE" in cartel_info and "NO viable" not in cartel_info:
+                        # dades completes i dins del periode: ara SI te sentit el text d'alta
                         pl_nuevo = PLANTILLAS.get("clientes_nuevos", {})
                         textos_alta = list(pl_nuevo.get("textos_aprobados", {}).values())
                         if textos_alta:
                             respuesta_directa = textos_alta[0]
                             avisos += " [PLANTILLA FIXA: alta client nou (copy-paste)]"
+                    elif "no indica" in cartel_info or "EN EL LIMITE" in cartel_info:
+                        # marca coneguda pero falta l'any (o es al limit): demanar la dada exacta
+                        respuesta_directa = ("Buenos días:\n\nGracias por su interés. Para confirmar si su "
+                            "vehículo entra dentro del periodo de afectación del cártel, necesitamos la "
+                            "fecha de matriculación (mes y año) y, si la tiene a mano, la matrícula del "
+                            "vehículo. En cuanto nos la facilite, le confirmamos la viabilidad y los pasos "
+                            "a seguir.\n\nUn saludo,\nEl equipo de atención")
+                        avisos += " [PLANTILLA FIXA: peticio de data de matriculacio]"
+                    elif not cartel_info:
+                        # cap dada del vehicle: demanar-ho tot (sembra el seguent mail)
+                        respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. Para poder valorar su "
+                            "caso necesitamos algunos datos del vehículo: marca, fecha de matriculación "
+                            "(mes y año) y, si la tiene a mano, la matrícula. Con esa información le "
+                            "confirmamos si entra en el periodo de afectación del cártel y los pasos a "
+                            "seguir.\n\nUn saludo,\nEl equipo de atención")
+                        avisos += " [PLANTILLA FIXA: peticio de dades del vehicle]"
+                    # (si diu NO viable: cap al redactor amb la plantilla d'elegibilitat)
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
                     guia += ("SITUACION DE SUCESION: saludo formal (Estimado/a senyor/a o Buenos dias; NUNCA Querido/a), tono sobrio y humano, condolencias breves si procede, "
                              "explicar que una persona del equipo se hara cargo personalmente de su caso "

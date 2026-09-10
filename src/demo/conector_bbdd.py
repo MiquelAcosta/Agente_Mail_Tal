@@ -137,6 +137,45 @@ def fichas_por_matricula(matricula, max_fichas=3):
         cn.close()
 
 
+_COLS_TEL = None
+
+
+def _columnas_telefono(cn):
+    global _COLS_TEL
+    if _COLS_TEL is None:
+        cur = cn.cursor()
+        cur.execute("SELECT COLUMN_NAME FROM information_schema.COLUMNS "
+                    "WHERE TABLE_NAME='wp_base_xam' AND COLUMN_NAME LIKE '%telefono%'")
+        _COLS_TEL = [r[0] for r in cur.fetchall()]
+    return _COLS_TEL
+
+
+def fichas_por_telefono(telefono, max_fichas=3):
+    """Cerca per telefon (nomes digits). LOCALITZADOR: mai autenticacio d'enviament."""
+    tel = "".join(ch for ch in str(telefono) if ch.isdigit())
+    if len(tel) < 9:
+        return []
+    tel = tel[-9:]
+    cn = _conexion()
+    try:
+        cols = _columnas_telefono(cn)
+        if not cols:
+            return []
+        cond = " OR ".join(
+            f"REPLACE(REPLACE(REPLACE(TRIM({c}),' ',''),'-',''),'.','') LIKE %s" for c in cols)
+        cur = cn.cursor(dictionary=True)
+        cur.execute(f"SELECT {CAMPOS} FROM wp_base_xam WHERE {cond} LIMIT {int(max_fichas)}",
+                    ["%" + tel] * len(cols))
+        return [_traducir(f) for f in cur.fetchall()]
+    finally:
+        cn.close()
+
+
+def ficha_por_telefono(telefono):
+    fichas = fichas_por_telefono(telefono, max_fichas=1)
+    return fichas[0] if fichas else None
+
+
 def ficha_por_matricula(matricula):
     fichas = fichas_por_matricula(matricula, max_fichas=1)
     return fichas[0] if fichas else None
