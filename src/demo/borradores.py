@@ -65,6 +65,7 @@ Reglas INQUEBRANTABLES:
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
 5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones.
 6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
+7. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
 
@@ -290,6 +291,42 @@ def log_init():
     return con
 
 
+import re as _re
+
+
+def formatear_respuesta(texto):
+    """Garanteix format de correu cordial encara que el model escrigui un bloc:
+    salutacio en linia propia, paragrafs, i firma en dues linies."""
+    t = (texto or "").strip()
+    if not t:
+        return t
+    # normalitzar salts existents
+    t = t.replace("\r\n", "\n").replace("\r", "\n")
+    # firma en linies propies
+    t = _re.sub(r"\s*Un saludo,?\s*", "\n\nUn saludo,\n", t, count=1)
+    t = _re.sub(r"(Un saludo,\n)\s*(El equipo de atenci[oó]n)\.?", r"\1\2", t)
+    if not _re.search(r"el equipo de atenci", t, _re.IGNORECASE):
+        t = t.rstrip() + ("" if t.rstrip().endswith("Un saludo,") else "\n\nUn saludo,") + "\nEl equipo de atención"
+    # salutacio en linia propia: tallar despres de la PRIMERA frase (punt o dos punts)
+    primera = t.split("\n", 1)[0]
+    m = _re.match(r"^(.{3,70}?[.:])\s+(\S)", primera)
+    if m and _re.match(r"^(Buen|Estimad|Hola|Querid|Apreciad)", primera, _re.IGNORECASE):
+        t = t.replace(m.group(0), m.group(1) + "\n\n" + m.group(2), 1)
+    # partir cossos massa llargs sense paragrafs: despres de frase, cada ~2 frases
+    bloques = t.split("\n\n")
+    nuevos = []
+    for b in bloques:
+        if "\n" not in b and len(b) > 320:
+            frases = _re.split(r"(?<=[.!?]) ", b)
+            mitad = len(frases) // 2
+            b = " ".join(frases[:mitad]) + "\n\n" + " ".join(frases[mitad:])
+        nuevos.append(b)
+    t = "\n\n".join(nuevos)
+    # neteja de salts triples
+    t = _re.sub(r"\n{3,}", "\n\n", t)
+    return t.strip()
+
+
 def ficha_a_datos(ficha):
     partes = [f"Titular: {ficha.get('titular','')}", f"Matricula: {ficha.get('matricula','')}"]
     if ficha.get("vehiculo"):
@@ -337,6 +374,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             n += 1
             if n > max_mails:
                 break
+            if str(esc.get("solo_no_leidos", "")).lower() in ("si", "sí", "true", "on", "1") and not msg.UnRead:
+                print(f"\n=== {str(msg.Subject or '')[:50]}")
+                print("    OMES: mail ja llegit per algu de l'equip (solo_no_leidos actiu)")
+                con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
+                             "", "", "", "", "", "OMITIDO (leido)", ""))
+                con.commit()
+                continue
             if ya_respondido(msg):
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    OMES: ja te resposta enviada des d'aquesta bustia")
@@ -465,6 +511,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
                              f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                 confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
+                respuesta = formatear_respuesta(respuesta)
                 print(f"    confianza: {confianza} | doc: {doc}")
                 if confianza == "baja":
                     avisos += " [CONFIANCA BAIXA del redactor]"
