@@ -86,6 +86,8 @@ def ciclo(cfg):
          ["borradores.py", "--outlook", cfg["buzon"], "--carpeta", "1 FACIL", "--real"])
     paso("ESBORRANYS del calaix 2 DIFICIL",
          ["borradores.py", "--outlook", cfg["buzon"], "--carpeta", "2 DIFICIL", "--real"])
+    paso("ESBORRANYS del calaix 3 DESISTIMIENTO",
+         ["borradores.py", "--outlook", cfg["buzon"], "--carpeta", "3 DESISTIMIENTO", "--real"])
 
 
 if __name__ == "__main__":

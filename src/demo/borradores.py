@@ -507,10 +507,12 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     for situacion, texto in (coincidentes or textos).items():
                         guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
                 if not ficha:
-                    ref = PLANTILLAS.get("_referencia_equipo_no_automatizable", {})
+                    pl_nuevo = PLANTILLAS.get("clientes_nuevos", {})
+                    texto_alta = " ".join(pl_nuevo.get("textos_aprobados", {}).values())
                     guia += ("SITUACION SIN FICHA — elige segun el mensaje: (a) si es un interesado "
-                             "nuevo que quiere reclamar, usa este TEXTO APROBADO de alta: "
-                             + ref.get("clientes_nuevos", "") +
+                             "nuevo que quiere reclamar (y la COMPROBACION CARTEL, si existe, NO dice "
+                             "que sea no viable), COPIA TAL CUAL este texto oficial, sin reescribirlo: "
+                             + texto_alta +
                              " (b) si pregunta por un expediente existente, responde que no localizamos "
                              "su expediente con este correo y pidele amablemente la matricula del vehiculo "
                              "o el email con el que se registro.\n")
@@ -525,6 +527,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                 confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                 respuesta = formatear_respuesta(respuesta)
+                if "adjunt" in respuesta.lower():
+                    avisos += " [RECORDA ADJUNTAR els PDF que la resposta menciona abans d'enviar]"
                 print(f"    confianza: {confianza} | doc: {doc}")
                 if confianza == "baja":
                     avisos += " [CONFIANCA BAIXA del redactor]"

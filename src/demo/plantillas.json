@@ -15,7 +15,8 @@
     "guia": "Text aprovat de l'equip. Si el client diu explicitament que no te la factura, oferir el Modelo 576 (document D2 = pasos para solicitarlo).",
     "textos_aprobados": {
       "no tiene factura": "En ese caso, puede solicitar el Modelo 576 en Hacienda. En dicho documento aparece la base imponible; a partir de ahi, nosotros calculamos el IVA y obtenemos el importe realmente abonado. Le adjuntamos los pasos a seguir."
-    }
+    },
+    "literal": true
   },
   "coste_comision": {
     "guia": "Seguir el text aprovat. Es l'unica categoria on SI es donen xifres, perque son les del contracte estandard aprovades per l'equip. Si el cas del client sembla especial, confianza baja.",
@@ -67,6 +68,19 @@
     "textos_aprobados": {
       "indemnizacion orientativa si pregunta cuanto": "El sobreprecio estimado oscila entre el 5% y el 15% del precio de compra; el perito judicial cuantifica el importe concreto de cada caso. A modo orientativo, por un vehiculo de 20.000 euros la indemnizacion estimada seria de entre 1.000 y 3.000 euros. Nunca podemos garantizar cantidades exactas.",
       "segunda mano particular": "Lamentablemente, en el caso de vehiculos comprados de segunda mano por particulares no es posible reclamar: el sobreprecio del cartel lo sufrio quien compro el coche nuevo, y solo el primer comprador tiene derecho a la reclamacion."
+    }
+  },
+  "cancelacion_desistimiento": {
+    "guia": "Acusament de rebuda del desistiment, respectuos i sense friccio: agrair la comunicacio, lamentar breument la decisio SENSE intentar retenir ni discutir, i informar que una persona de l'equip tramitara la baixa i li confirmara per correu. NO afirmar condicions economiques del desistiment (terminis, costos): aixo ho comunicara la persona segons el seu contracte i la data de firma. NO confirmar que la baixa ja esta feta: nomes que es tramitara.",
+    "textos_aprobados": {
+      "solicitud de desistimiento/baja": "Hemos recibido su solicitud de desistimiento y lamentamos su decision. Una persona de nuestro equipo se encargara personalmente de tramitarla y le confirmara por este medio los detalles y condiciones aplicables segun su contrato. Si hay algo que podamos aclarar o mejorar, estamos a su disposicion."
+    }
+  },
+  "clientes_nuevos": {
+    "literal": true,
+    "guia": "Text OFICIAL d'alta de client nou. Usar quan un remitent SENSE fitxa es un interessat que vol reclamar (i la COMPROBACION CARTEL no digui NO viable). COPIA EL TEXT TAL QUAL.",
+    "textos_aprobados": {
+      "interesado nuevo que quiere reclamar": "Buenos días,\n\nEl caso que nos comenta entraría dentro de las fechas de afectación de la marca y podría reclamar por él siempre que lo adquiriera de primera mano. El primer paso es que nos mande rellenada y firmada (por el titular de la compra del vehículo) la propuesta de honorarios que le dejamos adjuntada en este mismo correo.\n\nPor otro lado, necesitamos que nos mande la siguiente documentación:\n\n- Factura de compra o cualquier comprobante de pago donde aparezca el precio del vehículo (en caso de no conservarla deberá solicitar en Hacienda el modelo 576 siguiendo los pasos que le indicamos en el PDF adjunto)\n- Ficha técnica o permiso de circulación (en caso de no tenerla deberá solicitar en la DGT el informe completo del vehículo)\n- DNI del titular de la compra del vehículo.\n\nQuedamos a la espera.\n\nUn saludo,\nEl equipo de atención"
     }
   }
 }
