@@ -29,7 +29,8 @@ from reglas import triaje, REGEX_MATRICULA
 
 RUTA_ESC = os.path.join(AQUI, "escenario.json")
 
-CARPETAS = {"DESCARTES": "0 DESCARTES", "FACIL": "1 FACIL", "DIFICIL": "2 DIFICIL"}
+CARPETAS = {"DESCARTES": "0 DESCARTES", "FACIL": "1 FACIL", "DIFICIL": "2 DIFICIL",
+            "DESISTIMIENTO": "3 DESISTIMIENTO"}
 
 CATEGORIAS_FACIL = {"estado_reclamacion", "confirmacion_documentacion",
                     "problema_web_subida", "informacion_general",
@@ -158,6 +159,8 @@ def calaix_de(destino, categoria, flags, motivo=""):
         return "DESCARTES"
     if motivo == "adjunto_real" or destino == "HUMANO_SUCESION":
         return "DIFICIL"
+    if categoria == "cancelacion_desistimiento" or "cancelacion" in (flags or ""):
+        return "DESISTIMIENTO"    # esborrany d'acusament + tramit manual del treballador
     if flags:
         return "DIFICIL"          # sucesion/cancelacio/enfado/repregunta: persona
     if motivo == "sin_ficha_bbdd":
