@@ -157,6 +157,7 @@ def cargar_escenario():
     return esc
 
 
+_RE_EMAIL_SOLO = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 RE_DE = re.compile(r"^\s*>?\s*(?:De|From|Von|A):?\s*(.{0,120}?)([\w.+-]+@[\w-]+(?:\.[\w-]+)+)",
                    re.IGNORECASE | re.MULTILINE)
 
@@ -189,6 +190,12 @@ def extraer_cliente_de_reenvio(cuerpo, internos=()):
         if es_reenviador(email, internos):
             continue  # adreca nostra citada al fil: seguir buscant el client
         return email
+    # Xarxa: cap "De:" trobat -> primer email EXTERN escrit al cos (simulacions
+    # directes i casos on el client menciona la seva adreca a pel)
+    for m in _RE_EMAIL_SOLO.finditer(cuerpo or ""):
+        email = m.group(0).lower()
+        if not es_reenviador(email, internos):
+            return email
     return None
 
 
@@ -551,6 +558,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         if textos_alta:
                             respuesta_directa = textos_alta[0]
                             avisos += " [PLANTILLA FIXA: alta client nou (copy-paste)]"
+                    elif any(k in t_low for k in ("modelo 576", "el 576", "modelo576", "no tengo factura",
+                                                   "no encuentro la factura", "no conservo la factura",
+                                                   "sin factura", "perdido la factura")):
+                        pl_f = PLANTILLAS.get("falta_factura_precio", {})
+                        textos_f = list(pl_f.get("textos_aprobados", {}).values())
+                        if textos_f:
+                            respuesta_directa = textos_f[0]
+                            avisos += " [PLANTILLA FIXA: pasos modelo 576]"
                     elif "no indica" in cartel_info or "EN EL LIMITE" in cartel_info:
                         # marca coneguda pero falta l'any (o es al limit): demanar la dada exacta
                         respuesta_directa = ("Buenos días:\n\nGracias por su interés. Para confirmar si su "

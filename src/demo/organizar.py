@@ -53,6 +53,7 @@ Reglas: fuera_de_contexto = el mail NO es de un cliente sobre su reclamacion (pr
 
 
 import re
+_RE_EMAIL_SOLO = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 RE_DE = re.compile(r"^\s*>?\s*(?:De|From|Von|A):?\s*(.{0,120}?)([\w.+-]+@[\w-]+(?:\.[\w-]+)+)",
                    re.IGNORECASE | re.MULTILINE)
 
@@ -80,6 +81,12 @@ def extraer_cliente_de_reenvio(cuerpo, internos=()):
         if es_reenviador(email, internos):
             continue
         return email
+    # Xarxa: cap "De:" trobat -> primer email EXTERN escrit al cos (simulacions
+    # directes i casos on el client menciona la seva adreca a pel)
+    for m in _RE_EMAIL_SOLO.finditer(cuerpo or ""):
+        email = m.group(0).lower()
+        if not es_reenviador(email, internos):
+            return email
     return None
 
 
