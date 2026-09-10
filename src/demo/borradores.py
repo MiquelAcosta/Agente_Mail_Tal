@@ -506,34 +506,50 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                     if s.replace("si estado = ", "")[:28].lower() in datos.lower()}
                     for situacion, texto in (coincidentes or textos).items():
                         guia += f"TEXTO APROBADO ({situacion}): {texto}\n"
-                if not ficha:
-                    pl_nuevo = PLANTILLAS.get("clientes_nuevos", {})
-                    texto_alta = " ".join(pl_nuevo.get("textos_aprobados", {}).values())
-                    guia += ("SITUACION SIN FICHA — elige segun el mensaje: (a) si es un interesado "
-                             "nuevo que quiere reclamar (y la COMPROBACION CARTEL, si existe, NO dice "
-                             "que sea no viable), COPIA TAL CUAL este texto oficial, sin reescribirlo: "
-                             + texto_alta +
-                             " (b) si pregunta por un expediente existente, responde que no localizamos "
-                             "su expediente con este correo y pidele amablemente la matricula del vehiculo "
-                             "o el email con el que se registro.\n")
+                # SENSE FITXA: decisio DETERMINISTA en codi (copy-paste real, sense IA redactant)
+                respuesta_directa = None
+                if not ficha and "cancelacion" not in flags and categoria not in (
+                        "cancelacion_desistimiento", "cortesia_breve", "contacto_llamada"):
+                    t_low = (asunto + " " + cuerpo).lower()
+                    pide_expediente = any(k in t_low for k in
+                        ("mi expediente", "mi reclamacion", "mi reclamación", "mi caso",
+                         "como va", "cómo va", "estado de mi", "mi demanda"))
+                    no_viable = ("NO viable" in cartel_info)
+                    if pide_expediente:
+                        respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. No localizamos "
+                            "ningún expediente asociado a esta dirección de correo. Para poder ayudarle, "
+                            "¿puede indicarnos la matrícula del vehículo o el correo electrónico con el "
+                            "que se registró?\n\nUn saludo,\nEl equipo de atención")
+                        avisos += " [PLANTILLA FIXA: peticio d'identificacio]"
+                    elif not no_viable:
+                        pl_nuevo = PLANTILLAS.get("clientes_nuevos", {})
+                        textos_alta = list(pl_nuevo.get("textos_aprobados", {}).values())
+                        if textos_alta:
+                            respuesta_directa = textos_alta[0]
+                            avisos += " [PLANTILLA FIXA: alta client nou (copy-paste)]"
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
                     guia += ("SITUACION DE SUCESION: saludo formal (Estimado/a senyor/a o Buenos dias; NUNCA Querido/a), tono sobrio y humano, condolencias breves si procede, "
                              "explicar que una persona del equipo se hara cargo personalmente de su caso "
                              "y le contactara. NO detallar tramites ni datos del expediente.\n")
 
-                print("    REDACTOR -> escribiendo...")
-                red = llamar(ia, PROMPT_REDACTOR,
-                             f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
-                             f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
-                confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
-                respuesta = formatear_respuesta(respuesta)
-                if "adjunt" in respuesta.lower():
-                    avisos += " [RECORDA ADJUNTAR els PDF que la resposta menciona abans d'enviar]"
-                print(f"    confianza: {confianza} | doc: {doc}")
-                if confianza == "baja":
+                if respuesta_directa is not None:
+                    respuesta = formatear_respuesta(respuesta_directa)
+                    confianza, doc = "plantilla", "NINGUNO"
+                    print("    PLANTILLA FIXA -> copy-paste (sense redactor)")
+                else:
+                  print("    REDACTOR -> escribiendo...")
+                  red = llamar(ia, PROMPT_REDACTOR,
+                               f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
+                               f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
+                  confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
+                  respuesta = formatear_respuesta(respuesta)
+                  print(f"    confianza: {confianza} | doc: {doc}")
+                  if confianza == "baja":
                     avisos += " [CONFIANCA BAIXA del redactor]"
 
-                if str(esc.get("verificador", "on")).lower() in ("off", "no", "false", "0"):
+                if "adjunt" in respuesta.lower():
+                    avisos += " [RECORDA ADJUNTAR els PDF que la resposta menciona abans d'enviar]"
+                if respuesta_directa is not None or str(esc.get("verificador", "on")).lower() in ("off", "no", "false", "0"):
                     ver_txt = "OMITIDO"
                 else:
                   print("    VERIFICADOR -> revisando...")
