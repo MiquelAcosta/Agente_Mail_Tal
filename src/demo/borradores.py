@@ -16,7 +16,7 @@ Us (des de l'arrel del repo, amb Outlook obert):
 --dry: fa tot el proces pero NO crea l'esborrany (assaig complet).
 Registre: src\\demo\\log_borradores.sqlite (no reprocessa mails ja vistos).
 """
-import json, os, re, sys, sqlite3, urllib.request, argparse
+import json, os, re, sys, time, sqlite3, urllib.request, argparse
 
 PLANTILLAS = {}
 TABLA_CARTEL = {}
@@ -65,8 +65,9 @@ Reglas INQUEBRANTABLES:
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
 5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones.
 6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
-7. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
-8. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
+7. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
+8. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
+9. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
 
@@ -290,6 +291,13 @@ def llamar(ia, system, user, timeout=480, rapido=False):
         try:
             data = _llamada_cruda(ia, system, user, timeout, modelo=modelo)
             t = data["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
+            if not t:
+                raise ValueError("el model ha retornat contingut BUIT")
+            if "{" not in t:
+                # prosa sense JSON: per al redactor, la prosa ES la resposta
+                print("    (el model ha respost text pla sense JSON: s'aprofita com a resposta)")
+                return {"respuesta": t, "confianza": "media", "documento_salida": "NINGUNO",
+                        "categoria": "ambiguo", "veredicto": "", "motivo": "text pla del model"}
             return json.loads(t[t.find("{"):t.rfind("}") + 1], strict=False)
         except json.JSONDecodeError as e:
             try:
@@ -300,12 +308,15 @@ def llamar(ia, system, user, timeout=480, rapido=False):
                 print("    (JSON trencat del model: camps rescatats amb la xarxa)")
                 return salvado
             if intento == 2:
+                print(f"    (contingut cru del model: {repr(t[:160])})")
                 raise
-            print(f"    (crida fallida: {str(e)[:60]} — reintentant...)")
+            print(f"    (crida fallida: {str(e)[:60]} — pausa i reintent...)")
+            time.sleep(3)
         except Exception as e:
             if intento == 2:
                 raise
-            print(f"    (crida fallida: {str(e)[:60]} — reintentant, el model pot estar recarregant-se...)")
+            print(f"    (crida fallida: {str(e)[:60]} — pausa i reintent...)")
+            time.sleep(3)
 
 
 def escalfar(ia):
