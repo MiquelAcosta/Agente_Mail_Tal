@@ -269,6 +269,19 @@ def escalfar(ia):
 
 
 PROP_LAST_VERB = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
+PROP_MSG_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
+
+
+def id_estable(msg):
+    """Identificador que sobreviu a moviments de carpeta: el Message-ID d'internet.
+    (L'EntryID canvia en moure el mail; el Message-ID viatja amb ell.)"""
+    try:
+        mid = msg.PropertyAccessor.GetProperty(PROP_MSG_ID)
+        if mid:
+            return "msgid:" + str(mid).strip()
+    except Exception:
+        pass
+    return "outlook:" + str(msg.EntryID)
 
 
 def ya_respondido(msg):
@@ -368,7 +381,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
         try:
             if msg.Class != 43:
                 continue
-            mail_id = "outlook:" + str(msg.EntryID)
+            mail_id = id_estable(msg)
             if con.execute("SELECT 1 FROM borradores WHERE mail_id=?", (mail_id,)).fetchone():
                 continue
             n += 1
@@ -574,6 +587,8 @@ if __name__ == "__main__":
     ap.add_argument("--dry", action="store_true", help="assaig: tot el proces sense crear esborranys")
     ap.add_argument("--real", action="store_true",
                     help="mode 100%% BBDD: fitxes nomes de la BBDD real, filtre d'historial desactivat")
+    ap.add_argument("--registrar", action="store_true",
+                    help="apuntar els mails de la carpeta al registre SENSE fer res (vacuna contra duplicats)")
     ap.add_argument("--informe", action="store_true")
     args = ap.parse_args()
     esc = cargar_escenario()
@@ -594,6 +609,36 @@ if __name__ == "__main__":
     print("=" * 64)
     if args.informe:
         informe(con)
+    elif args.registrar and args.outlook:
+        import win32com.client
+        ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+        stores = [ns.Folders.Item(i + 1) for i in range(ns.Folders.Count)]
+        store = next((s for s in stores if args.outlook.lower() in s.Name.lower()), None)
+        def _buscar(raiz, nombre):
+            for i in range(raiz.Folders.Count):
+                f = raiz.Folders.Item(i + 1)
+                if f.Name.lower() == nombre.lower():
+                    return f
+                sub = _buscar(f, nombre)
+                if sub:
+                    return sub
+            return None
+        carpeta = _buscar(store, args.carpeta) if store else None
+        if carpeta is None:
+            print(f"No trobo '{args.carpeta}'."); os._exit(1)
+        n = 0
+        for msg in list(carpeta.Items):
+            if getattr(msg, "Class", 0) != 43:
+                continue
+            mid = id_estable(msg)
+            cur = con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                              " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                              (datetime.now(timezone.utc).isoformat(), mid, "", str(msg.Subject or ""),
+                               "", "", "", "", "", "REGISTRADO (vacuna, sense esborrany)", ""))
+            n += cur.rowcount
+        con.commit()
+        print(f"Vacunats {n} mails de '{args.carpeta}': el sistema ja no els tocara mai.")
+        con.close(); os._exit(0)
     elif args.outlook:
         escalfar(esc["ia"])
         procesar_carpeta(args.outlook, args.carpeta, esc, con, bbdd, args.dry, args.max)
