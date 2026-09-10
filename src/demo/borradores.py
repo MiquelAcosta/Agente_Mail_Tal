@@ -317,6 +317,57 @@ def ya_respondido(msg):
         return False
 
 
+def _subcarpeta_por_nombres(store, nombres):
+    try:
+        for i in range(store.Folders.Count):
+            f = store.Folders.Item(i + 1)
+            if f.Name.lower() in nombres:
+                return f
+    except Exception:
+        pass
+    return None
+
+
+def buscar_historial(inbox, enviados, email, max_por_lado=3):
+    """Busca al buzon els ultims mails d'aquest client (rebuts) i les nostres
+    respostes (enviats), i els retorna com a context cronologic per a la IA."""
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        return ""
+    piezas = []
+
+    def _recoger(carpeta, campo_dasl, etiqueta, campo_fecha):
+        if carpeta is None:
+            return
+        try:
+            filtro = f"@SQL=\"{campo_dasl}\" LIKE '%{email}%'"
+            items = carpeta.Items.Restrict(filtro)
+            items.Sort(f"[{campo_fecha}]", True)
+            n = 0
+            for it in items:
+                if getattr(it, "Class", 0) != 43:
+                    continue
+                fecha = getattr(it, campo_fecha, None)
+                cuerpo = str(getattr(it, "Body", "") or "")[:300].replace("\r\n", " ").replace("\n", " ")
+                piezas.append((fecha, etiqueta, str(getattr(it, "Subject", "") or "")[:60], cuerpo))
+                n += 1
+                if n >= max_por_lado:
+                    break
+        except Exception:
+            pass
+
+    _recoger(inbox, "urn:schemas:httpmail:senderemail", "CLIENTE", "ReceivedTime")
+    _recoger(enviados, "urn:schemas:httpmail:displayto", "EQUIPO", "SentOn")
+    if not piezas:
+        return ""
+    piezas.sort(key=lambda p: str(p[0]))
+    lineas = []
+    for fecha, quien, asunto, cuerpo in piezas[-6:]:
+        f = str(fecha)[:16] if fecha else "?"
+        lineas.append(f"[{f}] {quien} ({asunto}): {cuerpo}")
+    return "\n".join(lineas)[:1500]
+
+
 def log_init():
     con = sqlite3.connect(os.path.join(AQUI, "log_borradores.sqlite"))
     con.execute("""CREATE TABLE IF NOT EXISTS borradores(
@@ -396,6 +447,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     carpeta = buscar(store, nombre_carpeta)
     if carpeta is None:
         print(f"No trobo la carpeta '{nombre_carpeta}' dins de '{store.Name}'."); return
+    hist_on = str(esc.get("historial_buzon", "si")).lower() not in ("off", "no", "false", "0")
+    inbox = _subcarpeta_por_nombres(store, {"bandeja de entrada", "inbox"}) if hist_on else None
+    enviados = _subcarpeta_por_nombres(store, {"elementos enviados", "sent items", "enviados"}) if hist_on else None
     print(f"Llegint: {store.Name} > {carpeta.Name}" + ("   [MODE DRY: no es crearan esborranys]" if dry else ""))
 
     n = creados = 0
@@ -484,7 +538,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 resultado = destino + f" ({motivo}) — SENSE esborrany (per disseny)"
             else:
                 # Classificar sempre (amb o sense fitxa): la categoria tria la plantilla
-                c = llamar(ia, PROMPT_CLASIFICADOR, f"HILO: (no disponible)\n\nMENSAJE:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
+                c = llamar(ia, PROMPT_CLASIFICADOR, f"HISTORIAL PREVIO con este cliente:\n{hilo_txt}\n\nMENSAJE ACTUAL:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
                 categoria = c.get("categoria", "ambiguo")
                 flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion", "complejo",
                                               "repregunta_insatisfecha") if c.get(k))
@@ -507,6 +561,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
                     avisos += " [SUCESSIO: to especialment curos, revisar sempre]"
 
+                # Historial real del buzon amb aquest client (rebuts + respostes nostres)
+                hilo_txt = buscar_historial(inbox, enviados, rem) or "(sin historial en el buzon)"
+                if hilo_txt != "(sin historial en el buzon)":
+                    print(f"    historial del buzon: {hilo_txt.count(chr(10)) + 1} missatges previs trobats")
                 # Dades: fitxa real o avis de client no identificat
                 cartel_info = comprobar_cartel(asunto + " " + cuerpo, TABLA_CARTEL)
                 if ficha:
@@ -595,7 +653,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                   print("    REDACTOR -> escribiendo...")
                   red = llamar(ia, PROMPT_REDACTOR,
-                               f"DATOS VERIFICADOS: {datos}\nHILO: (no disponible)\nCATEGORIA: {categoria}\n{guia}"
+                               f"DATOS VERIFICADOS: {datos}\nHISTORIAL PREVIO con este cliente:\n{hilo_txt}\nCATEGORIA: {categoria}\n{guia}"
                                f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                   respuesta = formatear_respuesta(respuesta)
