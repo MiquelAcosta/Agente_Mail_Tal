@@ -12,8 +12,8 @@
     "buzon": "integracion",
     "carpeta_entrada": "Tests Auto Cartel",
     "intervalo_minutos": 5,
-    "hora_inicio": 8,
-    "hora_fin": 19,
+    "hora_inicio": 0,
+    "hora_fin": 24,
     "fines_de_semana": true
   },
   "historial": [],
