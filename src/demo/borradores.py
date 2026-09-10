@@ -65,7 +65,7 @@ Reglas INQUEBRANTABLES:
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
 5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones.
 6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
-7. Si en DATOS VERIFICADOS la documentacion del expediente muestra elementos en "No" que frenan el avance (factura, contrato, poderes), anade UNA linea cordial recordando ese pendiente e invitando a enviarlo respondiendo a este correo (sin presionar).
+7. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
 8. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
@@ -264,15 +264,44 @@ def _llamada_cruda(ia, system, user, timeout, modelo=None):
         return json.loads(r.read().decode("utf-8"))
 
 
+def _salvar_json_roto(texto):
+    """Ultima xarxa: pescar els camps amb regex quan el model escup JSON trencat."""
+    out = {}
+    m = _re.search(r'"respuesta"\s*:\s*"(.+?)"\s*(?=[,}]|"[a-z_]+"\s*:)', texto, _re.DOTALL)
+    if m:
+        out["respuesta"] = m.group(1).replace('\\n', '\n').replace('\\"', '"')
+    for campo in ("categoria", "confianza", "documento_salida", "veredicto", "motivo"):
+        m = _re.search(rf'"{campo}"\s*:\s*"([^"]*)"', texto)
+        if m:
+            out[campo] = m.group(1)
+    for flag in ("sospecha_sucesion", "cancelacion", "complejo", "repregunta_insatisfecha"):
+        m = _re.search(rf'"{flag}"\s*:\s*(true|false)', texto)
+        if m:
+            out[flag] = (m.group(1) == "true")
+    return out if out else None
+
+
 def llamar(ia, system, user, timeout=480, rapido=False):
     """Crida amb REINTENT. rapido=True usa el model 'modelo_rapido' si esta configurat
     (per a classificador/verificador: tasques simples, model petit = mes velocitat)."""
     modelo = ia.get("modelo_rapido") if (rapido and ia.get("modelo_rapido")) else None
     for intento in (1, 2):
+        t = ""
         try:
             data = _llamada_cruda(ia, system, user, timeout, modelo=modelo)
             t = data["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
             return json.loads(t[t.find("{"):t.rfind("}") + 1], strict=False)
+        except json.JSONDecodeError as e:
+            try:
+                salvado = _salvar_json_roto(t)
+            except Exception:
+                salvado = None
+            if salvado:
+                print("    (JSON trencat del model: camps rescatats amb la xarxa)")
+                return salvado
+            if intento == 2:
+                raise
+            print(f"    (crida fallida: {str(e)[:60]} — reintentant...)")
         except Exception as e:
             if intento == 2:
                 raise
@@ -395,9 +424,13 @@ def formatear_respuesta(texto):
         t = t.rstrip() + ("" if t.rstrip().endswith("Un saludo,") else "\n\nUn saludo,") + "\nEl equipo de atención"
     # salutacio en linia propia: tallar despres de la PRIMERA frase (punt o dos punts)
     primera = t.split("\n", 1)[0]
-    m = _re.match(r"^(.{3,70}?[.:])\s+(\S)", primera)
-    if m and _re.match(r"^(Buen|Estimad|Hola|Querid|Apreciad)", primera, _re.IGNORECASE):
-        t = t.replace(m.group(0), m.group(1) + "\n\n" + m.group(2), 1)
+    if _re.match(r"^(Buen|Estimad|Hola|Querid|Apreciad)", primera, _re.IGNORECASE):
+        for m in _re.finditer(r"(.{3,70}?[.:])\s+(?=\S)", primera):
+            tros = m.group(1)
+            if _re.search(r"(^|\s)[A-ZÁÉÍÓÚ]\.$", tros):
+                continue  # acaba en inicial ("M.") : no es final de salutacio
+            t = t.replace(tros + " ", tros + "\n\n", 1)
+            break
     # partir cossos massa llargs sense paragrafs: despres de frase, cada ~2 frases
     bloques = t.split("\n\n")
     nuevos = []
@@ -544,6 +577,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 # Classificar sempre (amb o sense fitxa): la categoria tria la plantilla
                 c = llamar(ia, PROMPT_CLASIFICADOR, f"HISTORIAL PREVIO con este cliente:\n{hilo_txt}\n\nMENSAJE ACTUAL:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
                 categoria = c.get("categoria", "ambiguo")
+                t_low = (asunto + " " + cuerpo).lower()
+                if categoria.startswith("cancelacion"):
+                    categoria = "cancelacion_desistimiento"
+                if ficha and categoria in ("informacion_general", "ambiguo") and any(
+                        k in t_low for k in ("como va", "cómo va", "estado de", "novedades",
+                                             "mi expediente", "mi reclamacion", "mi reclamación",
+                                             "mi caso", "mi coche", "que se sabe", "qué se sabe")):
+                    categoria = "estado_reclamacion"
+                    print("    (categoria ajustada a estado_reclamacion: pregunta per l'estat i te fitxa)")
                 flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion", "complejo",
                                               "repregunta_insatisfecha") if c.get(k))
                 print(f"    categoria: {categoria} | flags: {flags or 'ninguno'}")
@@ -599,7 +641,6 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 respuesta_directa = None
                 if not ficha and "cancelacion" not in flags and categoria not in (
                         "cancelacion_desistimiento", "cortesia_breve", "contacto_llamada"):
-                    t_low = (asunto + " " + cuerpo).lower()
                     pide_expediente = any(k in t_low for k in
                         ("mi expediente", "mi reclamacion", "mi reclamación", "mi caso",
                          "como va", "cómo va", "estado de mi", "mi demanda"))
@@ -781,4 +822,4 @@ if __name__ == "__main__":
         con.close()
         os._exit(0)
     else:
-        print("Cal --outlook \"NOM\" (i opcionalment --carpeta, --dry, --max).")g
+        print("Cal --outlook \"NOM\" (i opcionalment --carpeta, --dry, --max).")
