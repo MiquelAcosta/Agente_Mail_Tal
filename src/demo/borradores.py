@@ -528,12 +528,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     if filtro_fuente:
         print("    (filtre a la font: nomes mails NO llegits entren a la llista)")
     n = creados = 0
+    omesos_registre = 0
     for msg in list(items):
         try:
             if msg.Class != 43:
                 continue
             mail_id = id_estable(msg)
             if con.execute("SELECT 1 FROM borradores WHERE mail_id=?", (mail_id,)).fetchone():
+                omesos_registre += 1
                 continue
             n += 1
             if n > max_mails:
@@ -796,8 +798,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             con.commit()
         except Exception as e:
             print(f"    ERROR con este mail (se continua): {str(e)[:120]}")
-    print(f"\nFet: {min(n, max_mails)} mails processats, {creados} esborranys creats." if not dry
-          else f"\nFet (dry): {min(n, max_mails)} mails processats, 0 esborranys (mode assaig).")
+    extra = f" ({omesos_registre} omesos en silenci: ja al registre)" if omesos_registre else ""
+    print(f"\nFet: {min(n, max_mails)} mails processats, {creados} esborranys creats.{extra}" if not dry
+          else f"\nFet (dry): {min(n, max_mails)} mails processats, 0 esborranys (mode assaig).{extra}")
 
 
 def informe(con):
