@@ -63,7 +63,7 @@ Reglas INQUEBRANTABLES:
 3. Documento de salida: SOLO si el cliente PIDE explicitamente ese contenido en su mensaje. Si el cliente solo pregunta por el estado, agradece o hace una consulta puntual: "NINGUNO". Adjuntar un documento no pedido es un ERROR.
    Catalogo: D1 = Instructivo general del proceso (solo si pregunta como funciona el proceso). D2 = Guia de documentacion alternativa a la factura (solo si dice que no tiene o no encuentra la factura).
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
-5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones.
+5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones. MATIZ: si el cliente afirma haber enviado documentacion RECIENTEMENTE (hoy, ayer, "acabo de...") y en DATOS figura como no recibida, NO se lo niegues rotundamente: indica que el registro de documentacion puede tardar unas horas en actualizarse y que lo verificaremos; si en unos dias no recibe confirmacion, que nos lo reenvie.
 6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
 7. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
 8. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
@@ -330,6 +330,30 @@ def escalfar(ia):
         print(" Esta corrent Ollama? (ollama serve)\n")
 
 
+CATEGORIA_AGENTE = "Agente"  # etiqueta d'Outlook: marca indeleble de "ja tractat"
+
+
+def te_marca_agente(msg):
+    try:
+        return CATEGORIA_AGENTE.lower() in str(msg.Categories or "").lower()
+    except Exception:
+        return False
+
+
+def marcar_agente(msg, marcar_leido=False):
+    """Posa l'etiqueta 'Agente' al mail (i opcionalment el marca llegit).
+    La marca viu AL MAIL: sobreviu a neteges de registre i a moviments."""
+    try:
+        cats = str(msg.Categories or "")
+        if CATEGORIA_AGENTE.lower() not in cats.lower():
+            msg.Categories = (cats + "; " if cats else "") + CATEGORIA_AGENTE
+        if marcar_leido:
+            msg.UnRead = False
+        msg.Save()
+    except Exception as e:
+        print(f"    (avis: no s'ha pogut marcar el mail: {str(e)[:60]})")
+
+
 PROP_LAST_VERB = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
 PROP_MSG_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
 
@@ -507,6 +531,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             n += 1
             if n > max_mails:
                 break
+            if te_marca_agente(msg):
+                print(f"\n=== {str(msg.Subject or '')[:50]}")
+                print("    OMES: porta la marca 'Agente' (ja tractat, marca al propi mail)")
+                con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
+                             "", "", "", "", "", "OMITIDO (marca Agente)", ""))
+                con.commit()
+                continue
             if str(esc.get("solo_no_leidos", "")).lower() in ("si", "sí", "true", "on", "1") and not msg.UnRead:
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    OMES: mail ja llegit per algu de l'equip (solo_no_leidos actiu)")
@@ -519,6 +552,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             if ya_respondido(msg):
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    OMES: ja te resposta enviada des d'aquesta bustia")
+                marcar_agente(msg)
                 con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                             " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                             (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
@@ -676,22 +710,24 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         if textos_f:
                             respuesta_directa = textos_f[0]
                             avisos += " [PLANTILLA FIXA: pasos modelo 576]"
-                    elif "no indica" in cartel_info or "EN EL LIMITE" in cartel_info:
-                        # marca coneguda pero falta l'any (o es al limit): demanar la dada exacta
-                        respuesta_directa = ("Buenos días:\n\nGracias por su interés. Para confirmar si su "
-                            "vehículo entra dentro del periodo de afectación del cártel, necesitamos la "
-                            "fecha de matriculación (mes y año) y, si la tiene a mano, la matrícula del "
-                            "vehículo. En cuanto nos la facilite, le confirmamos la viabilidad y los pasos "
-                            "a seguir.\n\nUn saludo,\nEl equipo de atención")
-                        avisos += " [PLANTILLA FIXA: peticio de data de matriculacio]"
-                    elif not cartel_info:
-                        # cap dada del vehicle: demanar-ho tot (sembra el seguent mail)
-                        respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. Para poder valorar su "
-                            "caso necesitamos algunos datos del vehículo: marca, fecha de matriculación "
-                            "(mes y año) y, si la tiene a mano, la matrícula. Con esa información le "
-                            "confirmamos si entra en el periodo de afectación del cártel y los pasos a "
-                            "seguir.\n\nUn saludo,\nEl equipo de atención")
-                        avisos += " [PLANTILLA FIXA: peticio de dades del vehicle]"
+                    elif "no indica" in cartel_info or "EN EL LIMITE" in cartel_info or not cartel_info:
+                        # Falta informacio per resoldre la viabilitat. MAI demanar la data al
+                        # client (feina interna): si ja ha donat la matricula -> "ho comprovem"
+                        # + avis al treballador; si no -> demanar NOMES la matricula.
+                        mat_en_text = REGEX_MATRICULA.search((asunto + " " + cuerpo).upper())
+                        if mat_en_text:
+                            respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. Estamos "
+                                "comprobando los datos de su vehículo para confirmarle si entra dentro "
+                                "del periodo de afectación del cártel. Le responderemos en breve con la "
+                                "confirmación y los pasos a seguir.\n\nUn saludo,\nEl equipo de atención")
+                            avisos += (" [TREBALLADOR: comprovar la data de matriculacio de la "
+                                       f"matricula {mat_en_text.group(0).replace(' ', '')} (web) abans d'enviar]")
+                        else:
+                            respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. Para poder "
+                                "valorar su caso, ¿puede facilitarnos la matrícula del vehículo? Con ella "
+                                "comprobaremos si entra dentro del periodo de afectación del cártel y le "
+                                "indicaremos los pasos a seguir.\n\nUn saludo,\nEl equipo de atención")
+                            avisos += " [PLANTILLA FIXA: peticio de matricula]"
                     # (si diu NO viable: cap al redactor amb la plantilla d'elegibilitat)
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
                     guia += ("SITUACION DE SUCESION: saludo formal (Estimado/a senyor/a o Buenos dias; NUNCA Querido/a), tono sobrio y humano, condolencias breves si procede, "
@@ -737,6 +773,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     destino_seguro = esc.get("borradores_para", "").strip()
                     reply.To = destino_seguro if destino_seguro else rem
                     reply.Save()  # <- ESBORRANY. Mai .Send()
+                    marcar_agente(msg, marcar_leido=str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1"))
                     creados += 1
                     resultado = ("BORRADOR CREADO (per a: "
                                  + (destino_seguro if destino_seguro else rem) + ")" + avisos)
@@ -790,6 +827,10 @@ if __name__ == "__main__":
     print("=" * 64)
     print(" FASE 2 EN MAQUETA — esborranys | model:", esc["ia"]["modelo"])
     print(" Font de fitxes:", bbdd.modo, "| Aquest programa NO pot enviar res.")
+    filtro_leidos = str(esc.get("solo_no_leidos", "")).lower() in ("si", "sí", "true", "on", "1")
+    marcar_l = str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1")
+    print(" Filtre nomes-no-llegits:", "ACTIU" if filtro_leidos else "INACTIU",
+          "| Marca 'Agente': sempre | Esborrany fet -> marcar llegit:", "SI" if marcar_l else "NO")
     if args.real:
         print(" MODE --real: nomes BBDD real; filtre d'historial desactivat (pilot)")
     print("=" * 64)
