@@ -870,8 +870,9 @@ if __name__ == "__main__":
                               (datetime.now(timezone.utc).isoformat(), mid, "", str(msg.Subject or ""),
                                "", "", "", "", "", "REGISTRADO (vacuna, sense esborrany)", ""))
             n += cur.rowcount
+            marcar_agente(msg, marcar_leido=True)  # marca indeleble + llegit: veterans segellats
         con.commit()
-        print(f"Vacunats {n} mails de '{args.carpeta}': el sistema ja no els tocara mai.")
+        print(f"Vacunats {n} mails de '{args.carpeta}': marca 'Agente' + llegits + registre. Mai mes es tocaran.")
         con.close(); os._exit(0)
     elif args.outlook:
         escalfar(esc["ia"])
