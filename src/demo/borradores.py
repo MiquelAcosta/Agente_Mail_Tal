@@ -520,8 +520,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     enviados = _subcarpeta_por_nombres(store, {"elementos enviados", "sent items", "enviados"}) if hist_on else None
     print(f"Llegint: {store.Name} > {carpeta.Name}" + ("   [MODE DRY: no es crearan esborranys]" if dry else ""))
 
+    filtro_fuente = str(esc.get("solo_no_leidos", "si")).lower() not in ("no", "false", "off", "0")
+    try:
+        items = carpeta.Items.Restrict("[UnRead] = true") if filtro_fuente else carpeta.Items
+    except Exception:
+        items = carpeta.Items
+    if filtro_fuente:
+        print("    (filtre a la font: nomes mails NO llegits entren a la llista)")
     n = creados = 0
-    for msg in list(carpeta.Items):
+    for msg in list(items):
         try:
             if msg.Class != 43:
                 continue
@@ -540,7 +547,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              "", "", "", "", "", "OMITIDO (marca Agente)", ""))
                 con.commit()
                 continue
-            if str(esc.get("solo_no_leidos", "")).lower() in ("si", "sí", "true", "on", "1") and not msg.UnRead:
+            if str(esc.get("solo_no_leidos", "si")).lower() not in ("no", "false", "off", "0") and not msg.UnRead:
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    OMES: mail ja llegit per algu de l'equip (solo_no_leidos actiu)")
                 con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
@@ -827,7 +834,7 @@ if __name__ == "__main__":
     print("=" * 64)
     print(" FASE 2 EN MAQUETA — esborranys | model:", esc["ia"]["modelo"])
     print(" Font de fitxes:", bbdd.modo, "| Aquest programa NO pot enviar res.")
-    filtro_leidos = str(esc.get("solo_no_leidos", "")).lower() in ("si", "sí", "true", "on", "1")
+    filtro_leidos = str(esc.get("solo_no_leidos", "si")).lower() not in ("no", "false", "off", "0")
     marcar_l = str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1")
     print(" Filtre nomes-no-llegits:", "ACTIU" if filtro_leidos else "INACTIU",
           "| Marca 'Agente': sempre | Esborrany fet -> marcar llegit:", "SI" if marcar_l else "NO")
