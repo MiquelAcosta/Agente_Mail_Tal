@@ -532,9 +532,56 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
         items = carpeta.Items
     if filtro_fuente:
         print("    (filtre a la font: nomes mails NO llegits entren a la llista)")
+    lista_items = [m for m in list(items) if getattr(m, "Class", 0) == 43]
+
+    # AGRUPACIO PER CLIENT: si un client te diversos mails pendents, es respon
+    # NOMES el mes recent (amb els anteriors com a context); la resta es marca.
+    reenv_pre = esc.get("reenviadores", [])
+    def _clave_cliente(m):
+        try:
+            snd = str(getattr(m, "SenderEmailAddress", "") or "").lower()
+            if "@" not in snd or snd.startswith("/o="):
+                try:
+                    snd = str(m.PropertyAccessor.GetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x39FE001F")).lower()
+                except Exception:
+                    pass
+            if es_reenviador(snd, reenv_pre):
+                cli = extraer_cliente_de_reenvio(str(getattr(m, "Body", "") or "")[:4000],
+                                                 internos=reenv_pre)
+                return cli  # None si no s'extreu: no s'agrupa (evita agrupar reenviats aliens)
+            return snd if "@" in snd else None
+        except Exception:
+            return None
+
+    grupos = {}
+    for m in lista_items:
+        if te_marca_agente(m):
+            continue
+        k = _clave_cliente(m)
+        if k:
+            grupos.setdefault(k, []).append(m)
+    agrupados_omitir = {}   # mail_id -> mail_id del guanyador
+    contexto_grupo = {}     # mail_id guanyador -> [(fecha, asunto, extracte), ...]
+    for k, ms in grupos.items():
+        if len(ms) < 2:
+            continue
+        ms.sort(key=lambda m: str(getattr(m, "ReceivedTime", "")))
+        ganador, hermanos = ms[-1], ms[:-1]
+        gid = id_estable(ganador)
+        contexto_grupo[gid] = [(str(getattr(h, "ReceivedTime", ""))[:16],
+                                str(getattr(h, "Subject", "") or "")[:60],
+                                str(getattr(h, "Body", "") or "")[:300].replace("\r\n", " ").replace("\n", " "))
+                               for h in hermanos]
+        for h in hermanos:
+            agrupados_omitir[id_estable(h)] = gid
+    if agrupados_omitir:
+        print(f"    (agrupacio: {len(contexto_grupo)} clients amb multiples mails;"
+              f" {len(agrupados_omitir)} mails es contesten dins del mes recent)")
+
     n = creados = 0
     omesos_registre = 0
-    for msg in list(items):
+    for msg in lista_items:
         try:
             if msg.Class != 43:
                 continue
@@ -545,6 +592,16 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             n += 1
             if n > max_mails:
                 break
+            if mail_id in agrupados_omitir:
+                print(f"\n=== {str(msg.Subject or '')[:50]}")
+                print("    AGRUPAT: es contesta dins del mail mes recent del mateix client")
+                marcar_agente(msg, marcar_leido=True)
+                con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
+                             "", "", "", "", "", "AGRUPADO (contestado en el mail mas reciente del cliente)", ""))
+                con.commit()
+                continue
             if te_marca_agente(msg):
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    OMES: porta la marca 'Agente' (ja tractat, marca al propi mail)")
@@ -619,6 +676,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             categoria = flags = confianza = doc = ver_txt = respuesta = ""
             resultado = destino + " (" + motivo + ")"
             avisos = aviso_mat
+            if mail_id in contexto_grupo:
+                avisos += f" [AGRUPAT: respon tambe {len(contexto_grupo[mail_id])} mails previs del client]"
 
             # ESTRATEGIA: BORRADOR PER A TOT, excepte adjunts, sistema i DESCARTES.
             dominios = DOMINIOS_DESCARTES_BASE + [d.strip().lower().lstrip("@")
@@ -631,6 +690,11 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             else:
                 # Historial real del buzon amb aquest client (abans de classificar: el fa servir)
                 hilo_txt = buscar_historial(inbox, enviados, rem) or "(sin historial en el buzon)"
+                if mail_id in contexto_grupo:
+                    lineas_g = "\n".join(f"[{f}] ({a}): {c}" for f, a, c in contexto_grupo[mail_id])
+                    hilo_txt += ("\nOTROS MAILS RECIENTES DEL MISMO CLIENTE, AUN SIN RESPONDER "
+                                 "(esta respuesta debe atenderlos TODOS en un solo correo):\n" + lineas_g)
+                    print(f"    agrupats: aquest esborrany respon tambe {len(contexto_grupo[mail_id])} mails previs del client")
                 if "(sin historial" not in hilo_txt:
                     print(f"    historial del buzon: {hilo_txt.count(chr(10)) + 1} missatges previs trobats")
                 # Classificar sempre (amb o sense fitxa): la categoria tria la plantilla
