@@ -497,39 +497,54 @@ def ficha_a_datos(ficha):
     return " · ".join(partes)
 
 
-def fecha_mail(msg):
-    """Instant de recepcio en SEGONS (float), o None si no es pot determinar.
+def _componentes_de(v):
+    """Treu (any, mes, dia, hora, minut, segon) d'un valor de data d'Outlook."""
+    if v is None:
+        return None
+    try:                      # cami normal: l'objecte porta els components
+        anyo, mes, dia = int(v.year), int(v.month), int(v.day)
+        if 1990 <= anyo <= 2100 and 1 <= mes <= 12 and 1 <= dia <= 31:
+            return (anyo, mes, dia, int(getattr(v, "hour", 0) or 0),
+                    int(getattr(v, "minute", 0) or 0), int(getattr(v, "second", 0) or 0))
+    except Exception:
+        pass
+    t = str(v)
+    m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?", t)
+    if m:                     # ISO: 2026-09-15 10:04:00
+        return tuple(int(g or 0) for g in m.groups())
+    m = re.search(r"(\d{1,2})[/-](\d{1,2})[/-](\d{4})\D{0,3}(\d{1,2})?:?(\d{2})?:?(\d{2})?", t)
+    if m:                     # local: 15/09/2026 10:04
+        dia, mes, anyo = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if mes > 12:          # venia en format mm/dd
+            dia, mes = mes, dia
+        if 1 <= mes <= 12 and 1 <= dia <= 31:
+            return (anyo, mes, dia, int(m.group(4) or 0), int(m.group(5) or 0), int(m.group(6) or 0))
+    return None
 
-    Mai s'ordena per text: str() d'una data d'Outlook pot sortir en format local
-    (15/09/2026) i llavors l'ordre alfabetic menteix — compara el dia abans que
-    l'any. Aixi es com el 'mail mes nou' acabava sent el mes vell.
-    S'intenta, per ordre: ReceivedTime -> SentOn -> CreationTime -> la propietat
-    MAPI de lliurament."""
+
+def componentes_fecha(msg):
+    """Data REAL del mail com a tupla (any, mes, dia, hora, minut, segon).
+
+    Comparar aquesta tupla compara PRIMER l'any, despres el mes, despres el dia,
+    despres l'hora... que es l'unic ordre correcte. Mai s'ordena per text: en
+    format local '31/08/2026' surt DESPRES de '01/09/2026' alfabeticament, i per
+    aixo el 'mes nou' acabava sent el mes vell.
+    Torna None si cap font dona una data creible (llavors NO s'agrupa)."""
     for origen in ("ReceivedTime", "SentOn", "CreationTime"):
-        v = getattr(msg, origen, None)
-        if v is None:
-            continue
-        try:
-            return float(v.timestamp())
-        except Exception:
-            pass
-        try:   # PyTime antic: te components pero no timestamp()
-            return datetime(v.year, v.month, v.day, v.hour, v.minute, v.second).timestamp()
-        except Exception:
-            pass
+        t = _componentes_de(getattr(msg, origen, None))
+        if t:
+            return t
     try:
-        v = msg.PropertyAccessor.GetProperty(
-            "http://schemas.microsoft.com/mapi/proptag/0x0E060040")  # PR_MESSAGE_DELIVERY_TIME
-        return float(v.timestamp())
+        return _componentes_de(msg.PropertyAccessor.GetProperty(
+            "http://schemas.microsoft.com/mapi/proptag/0x0E060040"))
     except Exception:
         return None
 
 
-def fecha_texto(ts):
-    try:
-        return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
-    except Exception:
-        return "?"
+def fecha_texto(t):
+    if not t:
+        return "sense data"
+    return "%04d-%02d-%02d %02d:%02d:%02d" % t
 
 
 def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
@@ -601,14 +616,13 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     for k, ms in grupos.items():
         if len(ms) < 2:
             continue
-        fechados = [(fecha_mail(m), m) for m in ms]
+        fechados = [(componentes_fecha(m), m) for m in ms]
         if any(f is None for f, _ in fechados):
-            # Sense data fiable NO s'endevina qui es el mes nou: millor no agrupar
-            # (cada mail rep el seu esborrany, com abans) que respondre el vell.
             print(f"    (AVIS: no puc datar tots els mails de {k} — NO s'agrupen;"
                   " cada mail rep el seu esborrany)")
             continue
-        fechados.sort(key=lambda p: p[0])          # ordre REAL: vell -> nou
+        # Ordre REAL: compara any -> mes -> dia -> hora -> minut -> segon
+        fechados.sort(key=lambda p: p[0])
         ganador, hermanos = fechados[-1][1], [m for _, m in fechados[:-1]]
         gid = id_estable(ganador)
         contexto_grupo[gid] = [(fecha_texto(f),
@@ -617,11 +631,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                for f, h in fechados[:-1]]
         for h in hermanos:
             agrupados_omitir[id_estable(h)] = gid
-        print(f"    PACK {k}: {len(ms)} mails")
+        print(f"    PACK {k}: {len(ms)} mails (ordenats per any/mes/dia/hora)")
         for f, m in fechados[:-1]:
-            print(f"       previ    {fecha_texto(f)}  {str(getattr(m, 'Subject', '') or '')[:40]}")
+            print(f"       previ     {fecha_texto(f)}  {str(getattr(m, 'Subject', '') or '')[:38]}")
         print(f"       RESPON -> {fecha_texto(fechados[-1][0])}"
-              f"  {str(getattr(ganador, 'Subject', '') or '')[:40]}")
+              f"  {str(getattr(ganador, 'Subject', '') or '')[:38]}   <= EL MES NOU")
+    if agrupados_omitir:
+        print(f"    (agrupacio: {len(contexto_grupo)} clients amb multiples mails;"
+              f" {len(agrupados_omitir)} mails es contesten dins del mes recent)")
     if agrupados_omitir:
         print(f"    (agrupacio: {len(contexto_grupo)} clients amb multiples mails;"
               f" {len(agrupados_omitir)} mails es contesten dins del mes recent)")
@@ -894,6 +911,12 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if dry:
                     resultado = "BORRADOR (dry: no creado)" + avisos
                 else:
+                    if mail_id in agrupados_omitir:
+                        # Barrera dura: aquest mail NO es el mes nou del seu client.
+                        # Encara que hagi arribat fins aqui, no rep esborrany mai.
+                        print("    BLOQUEJAT: no es el mail mes nou del client —"
+                              " l'esborrany va al mes recent")
+                        raise RuntimeError("intent d'esborrany sobre un mail agrupat")
                     reply = msg.Reply()
                     reply.Body = respuesta  # nomes el missatge generat, sense fil citat
                     destino_seguro = esc.get("borradores_para", "").strip()
