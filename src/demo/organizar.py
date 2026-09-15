@@ -240,6 +240,8 @@ def agrupar_por_cliente(analisis, regla="ultimo"):
     sota el reenviador equivocat). Retorna {id(msg): (calaix, motiu, pack)}."""
     grupos = {}
     for info in analisis:
+        if not info.get("agrupable", True):
+            continue          # reenviament sense client identificat: va sol
         if info["calaix"] == "DESCARTES" or not info["rem"] or "@" not in info["rem"]:
             continue
         grupos.setdefault(info["rem"], []).append(info)
@@ -327,11 +329,17 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             mail = {"remitente": rem, "asunto": asunto, "cuerpo": cuerpo, "adjuntos": adjuntos}
 
             reenviadores = esc.get("reenviadores", [])
+            agrupable = True
             if es_reenviador(rem, reenviadores):
                 extraido = extraer_cliente_de_reenvio(cuerpo, internos=reenviadores)
                 if extraido:
                     rem = extraido
                     mail["remitente"] = rem
+                else:
+                    # Reenviament sense client extraible: el 'rem' segueix sent el
+                    # company que reenvia. NO es pot empaquetar o barrejariem
+                    # mails de clients diferents sota el mateix reenviador.
+                    agrupable = False
             categoria = flags = ""
             if es_dominio_descartes(rem, dominios):
                 destino, motivo = "SISTEMA", "dominio_no_cliente"
@@ -357,6 +365,7 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             calaix = calaix_de(destino, categoria, flags, motivo)
             print(f"  {rem[:34]:34} -> {CARPETAS[calaix]:12} ({categoria or motivo}{' ['+flags+']' if flags else ''})")
             analisis.append({"msg": msg, "orden": n, "rem": rem, "asunto": asunto,
+                             "agrupable": agrupable,
                              "recibido": getattr(msg, "ReceivedTime", None),
                              "destino": destino, "motivo": motivo, "categoria": categoria,
                              "flags": flags, "calaix": calaix})
