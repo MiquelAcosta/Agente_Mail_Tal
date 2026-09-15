@@ -55,7 +55,7 @@ PROMPT_CLASIFICADOR = """Eres el clasificador del buzon de atencion de una empre
 Categorias: estado_reclamacion, falta_factura_precio, envio_documentacion, confirmacion_documentacion, problema_web_subida, elegibilidad_vehiculo, informacion_general, coste_comision, poderes_pleitos, titularidad_caso_especial, cancelacion_desistimiento, cortesia_breve, contacto_llamada, fuera_de_contexto, ambiguo
 Reglas: fuera_de_contexto = SOLO cuando el mensaje claramente NO tiene NINGUNA relacion con reclamaciones, coches, expedientes, documentacion o clientes (ej: publicidad, notificaciones de software, temas internos de oficina). OJO: los mails reenviados llevan cabeceras De:/Para: internas — IGNORALAS, juzga solo el contenido del mensaje del cliente. Si menciona reclamacion, expediente, coche, cartel, factura, demanda o documentacion: NUNCA fuera_de_contexto. Ante la duda: ambiguo, no fuera_de_contexto. sospecha_sucesion=true ante CUALQUIER mencion a fallecimiento/herencia/viudedad/"era cliente" (ante la duda, true). cancelacion=true si expresa voluntad de desistir. complejo=true si varias peticiones, enojo, excepciones o dudas. cortesia_breve = agradecimientos/acuses SIN peticion nueva. Nada fuera del JSON."""
 
-PROMPT_REDACTOR = """Eres el redactor de respuestas del buzon de atencion de una empresa de reclamaciones de vehiculos. Tono cercano y claro, frases cortas, cero jerga juridica, en castellano. Tratamiento SIEMPRE de usted (nunca tutees). Firma SIEMPRE exactamente asi, en dos lineas finales: "Un saludo," y "El equipo de atencion".
+PROMPT_REDACTOR = """Eres el redactor de respuestas del buzon de atencion de una empresa de reclamaciones de vehiculos. Tono cercano y claro, frases cortas, cero jerga juridica, en castellano. Tratamiento SIEMPRE de usted (nunca tutees). CIERRE del mensaje: si pides al cliente que envie o facilite algo (documentos, datos, matricula), la ULTIMA linea es exactamente "Quedamos a la espera."; si solo informas o respondes, la ULTIMA linea es exactamente "Saludos cordiales,". PROHIBIDO firmar como "El equipo de atencion" o con cualquier nombre de equipo o persona: el cierre es la ultima linea del mensaje, sin firma.
 
 Reglas INQUEBRANTABLES:
 1. Solo afirmas datos que esten en DATOS VERIFICADOS o en el HILO. Si el dato necesario para responder NO esta, no lo inventes: confianza "baja".
@@ -65,9 +65,10 @@ Reglas INQUEBRANTABLES:
 4. 50-130 palabras. Saludo con el nombre si consta, respuesta directa, siguiente paso si lo hay, despedida. Un solo tema.
 5. Si el cliente dice que adjunta algo pero no consta: pide que lo reenvie, no confirmes recepciones. MATIZ: si el cliente afirma haber enviado documentacion RECIENTEMENTE (hoy, ayer, "acabo de...") y en DATOS figura como no recibida, NO se lo niegues rotundamente: indica que el registro de documentacion puede tardar unas horas en actualizarse y que lo verificaremos; si en unos dias no recibe confirmacion, que nos lo reenvie.
 6. El nombre del cliente SOLO puede salir de DATOS VERIFICADOS o de la firma de su mensaje. NUNCA lo deduzcas de la direccion de email. Si no lo sabes: saluda sin nombre ("Buenos dias:").
-7. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
-8. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
-9. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; "Un saludo," en una linea y "El equipo de atencion" en la siguiente.
+7. NO REPITAS lo ya dicho: si en el HISTORIAL PREVIO o en el hilo citado del propio mensaje ya se le pidio un documento (p.ej. el modelo 576) o ya se le dio una informacion, NO lo vuelvas a pedir ni a mencionar. Responde SOLO a lo nuevo del mensaje actual.
+8. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
+9. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
+10. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; y el CIERRE ("Quedamos a la espera." o "Saludos cordiales,") como ultima linea.
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
 
@@ -452,11 +453,15 @@ def formatear_respuesta(texto):
         return t
     # normalitzar salts existents
     t = t.replace("\r\n", "\n").replace("\r", "\n")
-    # firma en linies propies
-    t = _re.sub(r"\s*Un saludo,?\s*", "\n\nUn saludo,\n", t, count=1)
-    t = _re.sub(r"(Un saludo,\n)\s*(El equipo de atenci[oó]n)\.?", r"\1\2", t)
-    if not _re.search(r"el equipo de atenci", t, _re.IGNORECASE):
-        t = t.rstrip() + ("" if t.rstrip().endswith("Un saludo,") else "\n\nUn saludo,") + "\nEl equipo de atención"
+    # fora qualsevol firma d'equip o "Un saludo" que el model hagi posat
+    t = _re.sub(r"\s*Un saludo,?\s*(El equipo de atenci[oó]n\.?)?\s*$", "", t, flags=_re.IGNORECASE)
+    t = _re.sub(r"\s*El equipo de atenci[oó]n\.?\s*$", "", t, flags=_re.IGNORECASE)
+    t = _re.sub(r"\n\s*Un saludo,?\s*\n?", "\n", t, flags=_re.IGNORECASE)
+    # tancament garantit: peticio -> "Quedamos a la espera." | informatiu -> "Saludos cordiales,"
+    if not _re.search(r"(quedamos a la espera|saludos cordiales)\s*[.,]?\s*$", t, _re.IGNORECASE):
+        pide = _re.search(r"(env[ií]e|env[ií]enos|nos mande|m[aá]ndenos|facil[ií]t|adjunte|reenv[ií]e|"
+                          r"necesitamos que|puede indicarnos|puede facilitarnos|\?)", t, _re.IGNORECASE)
+        t = t.rstrip() + "\n\n" + ("Quedamos a la espera." if pide else "Saludos cordiales,")
     # salutacio en linia propia: tallar despres de la PRIMERA frase (punt o dos punts)
     primera = t.split("\n", 1)[0]
     if _re.match(r"^(Buen|Estimad|Hola|Querid|Apreciad)", primera, _re.IGNORECASE):
@@ -702,7 +707,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. No localizamos "
                             "ningún expediente asociado a esta dirección de correo. Para poder ayudarle, "
                             "¿puede indicarnos la matrícula del vehículo o el correo electrónico con el "
-                            "que se registró?\n\nUn saludo,\nEl equipo de atención")
+                            "que se registró?\n\nQuedamos a la espera.")
                         avisos += " [PLANTILLA FIXA: peticio d'identificacio]"
                     elif "VIABLE" in cartel_info and "NO viable" not in cartel_info:
                         # dades completes i dins del periode: ara SI te sentit el text d'alta
@@ -728,14 +733,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                             respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. Estamos "
                                 "comprobando los datos de su vehículo para confirmarle si entra dentro "
                                 "del periodo de afectación del cártel. Le responderemos en breve con la "
-                                "confirmación y los pasos a seguir.\n\nUn saludo,\nEl equipo de atención")
+                                "confirmación y los pasos a seguir.\n\nSaludos cordiales,")
                             avisos += (" [TREBALLADOR: comprovar la data de matriculacio de la "
                                        f"matricula {mat_en_text.group(0).replace(' ', '')} (web) abans d'enviar]")
                         else:
                             respuesta_directa = ("Buenos días:\n\nGracias por su mensaje. Para poder "
                                 "valorar su caso, ¿puede facilitarnos la matrícula del vehículo? Con ella "
                                 "comprobaremos si entra dentro del periodo de afectación del cártel y le "
-                                "indicaremos los pasos a seguir.\n\nUn saludo,\nEl equipo de atención")
+                                "indicaremos los pasos a seguir.\n\nQuedamos a la espera.")
                             avisos += " [PLANTILLA FIXA: peticio de matricula]"
                     # (si diu NO viable: cap al redactor amb la plantilla d'elegibilitat)
                 if sucesion_bbdd or c.get("sospecha_sucesion"):
