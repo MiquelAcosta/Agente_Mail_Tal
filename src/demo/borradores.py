@@ -682,7 +682,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print(f"    {cartel_info[:90]}...")
 
                 # Plantilla: la de la categoria; sense fitxa, la de clients nous
-                pl = PLANTILLAS.get(categoria, {})
+                plantillas_on = str(esc.get("plantillas", "si")).lower() not in ("no", "off", "false", "0")
+                pl = PLANTILLAS.get(categoria, {}) if plantillas_on else {}
                 guia = ""
                 if pl.get("guia"):
                     modo_pl = ("COPIA CASI LITERAL: usa el texto aprobado que coincida TAL CUAL, "
@@ -844,6 +845,8 @@ if __name__ == "__main__":
     print(" Font de fitxes:", bbdd.modo, "| Aquest programa NO pot enviar res.")
     filtro_leidos = str(esc.get("solo_no_leidos", "si")).lower() not in ("no", "false", "off", "0")
     marcar_l = str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1")
+    plant_on = str(esc.get("plantillas", "si")).lower() not in ("no", "off", "false", "0")
+    print(" Plantilles al redactor:", "SI" if plant_on else "NO (pur agent: nomes dades + regles)")
     print(" Filtre nomes-no-llegits:", "ACTIU" if filtro_leidos else "INACTIU",
           "| Marca 'Agente': sempre | Esborrany fet -> marcar llegit:", "SI" if marcar_l else "NO")
     if args.real:
