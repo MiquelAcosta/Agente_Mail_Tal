@@ -497,6 +497,41 @@ def ficha_a_datos(ficha):
     return " · ".join(partes)
 
 
+def fecha_mail(msg):
+    """Instant de recepcio en SEGONS (float), o None si no es pot determinar.
+
+    Mai s'ordena per text: str() d'una data d'Outlook pot sortir en format local
+    (15/09/2026) i llavors l'ordre alfabetic menteix — compara el dia abans que
+    l'any. Aixi es com el 'mail mes nou' acabava sent el mes vell.
+    S'intenta, per ordre: ReceivedTime -> SentOn -> CreationTime -> la propietat
+    MAPI de lliurament."""
+    for origen in ("ReceivedTime", "SentOn", "CreationTime"):
+        v = getattr(msg, origen, None)
+        if v is None:
+            continue
+        try:
+            return float(v.timestamp())
+        except Exception:
+            pass
+        try:   # PyTime antic: te components pero no timestamp()
+            return datetime(v.year, v.month, v.day, v.hour, v.minute, v.second).timestamp()
+        except Exception:
+            pass
+    try:
+        v = msg.PropertyAccessor.GetProperty(
+            "http://schemas.microsoft.com/mapi/proptag/0x0E060040")  # PR_MESSAGE_DELIVERY_TIME
+        return float(v.timestamp())
+    except Exception:
+        return None
+
+
+def fecha_texto(ts):
+    try:
+        return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return "?"
+
+
 def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
     global PLANTILLAS
     import win32com.client
@@ -566,15 +601,27 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     for k, ms in grupos.items():
         if len(ms) < 2:
             continue
-        ms.sort(key=lambda m: str(getattr(m, "ReceivedTime", "")))
-        ganador, hermanos = ms[-1], ms[:-1]
+        fechados = [(fecha_mail(m), m) for m in ms]
+        if any(f is None for f, _ in fechados):
+            # Sense data fiable NO s'endevina qui es el mes nou: millor no agrupar
+            # (cada mail rep el seu esborrany, com abans) que respondre el vell.
+            print(f"    (AVIS: no puc datar tots els mails de {k} — NO s'agrupen;"
+                  " cada mail rep el seu esborrany)")
+            continue
+        fechados.sort(key=lambda p: p[0])          # ordre REAL: vell -> nou
+        ganador, hermanos = fechados[-1][1], [m for _, m in fechados[:-1]]
         gid = id_estable(ganador)
-        contexto_grupo[gid] = [(str(getattr(h, "ReceivedTime", ""))[:16],
+        contexto_grupo[gid] = [(fecha_texto(f),
                                 str(getattr(h, "Subject", "") or "")[:60],
                                 str(getattr(h, "Body", "") or "")[:300].replace("\r\n", " ").replace("\n", " "))
-                               for h in hermanos]
+                               for f, h in fechados[:-1]]
         for h in hermanos:
             agrupados_omitir[id_estable(h)] = gid
+        print(f"    PACK {k}: {len(ms)} mails")
+        for f, m in fechados[:-1]:
+            print(f"       previ    {fecha_texto(f)}  {str(getattr(m, 'Subject', '') or '')[:40]}")
+        print(f"       RESPON -> {fecha_texto(fechados[-1][0])}"
+              f"  {str(getattr(ganador, 'Subject', '') or '')[:40]}")
     if agrupados_omitir:
         print(f"    (agrupacio: {len(contexto_grupo)} clients amb multiples mails;"
               f" {len(agrupados_omitir)} mails es contesten dins del mes recent)")

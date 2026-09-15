@@ -221,17 +221,35 @@ def decidir_pack(infos, regla="ultimo"):
     return final, motiu
 
 
-def clave_orden(info):
-    """Data de recepcio comparable (amb l'ordre de la safata com a desempat)."""
-    r = info.get("recibido")
+def fecha_mail(msg):
+    """Instant de recepcio en SEGONS (float), o None si no es pot determinar.
+    Mai s'ordena per text: str() d'una data d'Outlook pot sortir en format local
+    (15/09/2026) i l'ordre alfabetic compara el dia abans que l'any."""
+    for origen in ("ReceivedTime", "SentOn", "CreationTime"):
+        v = getattr(msg, origen, None)
+        if v is None:
+            continue
+        try:
+            return float(v.timestamp())
+        except Exception:
+            pass
+        try:
+            return datetime(v.year, v.month, v.day, v.hour, v.minute, v.second).timestamp()
+        except Exception:
+            pass
     try:
-        return (0, r.timestamp(), info["orden"])
+        v = msg.PropertyAccessor.GetProperty(
+            "http://schemas.microsoft.com/mapi/proptag/0x0E060040")
+        return float(v.timestamp())
     except Exception:
-        pass
+        return None
+
+
+def fecha_texto(ts):
     try:
-        return (0, float(r), info["orden"])
+        return datetime.fromtimestamp(ts).strftime("%d/%m/%Y %H:%M")
     except Exception:
-        return (1, str(r), info["orden"])
+        return "?"
 
 
 def agrupar_por_cliente(analisis, regla="ultimo"):
@@ -250,7 +268,11 @@ def agrupar_por_cliente(analisis, regla="ultimo"):
     for cliente, infos in grupos.items():
         if len(infos) < 2:
             continue
-        infos.sort(key=clave_orden)
+        if any(i.get("recibido") is None for i in infos):
+            # Sense data fiable no es pot saber quin es el mes nou: no s'empaqueta.
+            print(f"  (AVIS: no puc datar tots els mails de {cliente} — no s'empaqueten)")
+            continue
+        infos.sort(key=lambda i: (i["recibido"], i["orden"]))
         calaix, motiu = decidir_pack(infos, regla)
         packs.append((cliente, infos, calaix, motiu))
         for info in infos:
@@ -366,7 +388,7 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             print(f"  {rem[:34]:34} -> {CARPETAS[calaix]:12} ({categoria or motivo}{' ['+flags+']' if flags else ''})")
             analisis.append({"msg": msg, "orden": n, "rem": rem, "asunto": asunto,
                              "agrupable": agrupable,
-                             "recibido": getattr(msg, "ReceivedTime", None),
+                             "recibido": fecha_mail(msg),
                              "destino": destino, "motivo": motivo, "categoria": categoria,
                              "flags": flags, "calaix": calaix})
         except Exception as e:
@@ -382,7 +404,8 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             for cliente, infos, calaix, motiu in packs:
                 print(f"  {cliente[:34]:34} {len(infos)} mails -> {CARPETAS[calaix]} ({motiu})")
                 for i, info in enumerate(infos):
-                    etiqueta = "MES NOU" if i == len(infos) - 1 else "previ   "
+                    etiqueta = ("MES NOU" if i == len(infos) - 1 else "previ  ") + \
+                              " " + fecha_texto(info["recibido"])
                     canvi = "" if info["calaix"] == calaix else f"  [{CARPETAS[info['calaix']]} -> {CARPETAS[calaix]}]"
                     print(f"      {etiqueta}  {str(info['asunto'])[:44]:44}{canvi}")
         else:
