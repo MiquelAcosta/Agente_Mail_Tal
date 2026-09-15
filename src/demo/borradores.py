@@ -583,6 +583,11 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     if filtro_fuente:
         print("    (filtre a la font: nomes mails NO llegits entren a la llista)")
     lista_items = [m for m in list(items) if getattr(m, "Class", 0) == 43]
+    # Ordre de treball: del MES NOU al mes vell. Aixi, si per qualsevol motiu
+    # l'agrupacio fallés, el primer mail que es tracta d'un client sempre es el
+    # mes recent — mai el vell.
+    lista_items.sort(key=lambda m: componentes_fecha(m) or (0, 0, 0, 0, 0, 0),
+                     reverse=True)
 
     # AGRUPACIO PER CLIENT: si un client te diversos mails pendents, es respon
     # NOMES el mes recent (amb els anteriors com a context); la resta es marca.
@@ -604,13 +609,50 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
         except Exception:
             return None
 
-    grupos = {}
+    def _clave_conversacion(m):
+        """El fil d'Outlook. Serveix de segona xarxa: si el client no s'identifica
+        igual als dos mails (reenviaments, adreces diferents), el fil els uneix."""
+        try:
+            v = getattr(m, "ConversationID", None)
+            if v:
+                return "conv:" + str(v)
+        except Exception:
+            pass
+        try:
+            t = str(getattr(m, "ConversationTopic", "") or "").strip().lower()
+            return ("tema:" + t) if t else None
+        except Exception:
+            return None
+
+    # Agrupacio per DUES claus alhora (client i fil): si dos mails comparteixen
+    # qualsevol de les dues, van al mateix grup. Union-find simple.
+    padre = {}
+    def _arrel(x):
+        while padre.get(x, x) != x:
+            padre[x] = padre.get(padre[x], padre[x])
+            x = padre[x]
+        return x
+    def _unir(a, b):
+        ra, rb = _arrel(a), _arrel(b)
+        if ra != rb:
+            padre[rb] = ra
+
+    candidatos = []
     for m in lista_items:
         if te_marca_agente(m):
             continue
-        k = _clave_cliente(m)
-        if k:
-            grupos.setdefault(k, []).append(m)
+        claves = [k for k in (_clave_cliente(m), _clave_conversacion(m)) if k]
+        if not claves:
+            continue
+        for k in claves:
+            padre.setdefault(k, k)
+        for k in claves[1:]:
+            _unir(claves[0], k)
+        candidatos.append((m, claves))
+
+    grupos = {}
+    for m, claves in candidatos:
+        grupos.setdefault(_arrel(claves[0]), []).append(m)
     agrupados_omitir = {}   # mail_id -> mail_id del guanyador
     contexto_grupo = {}     # mail_id guanyador -> [(fecha, asunto, extracte), ...]
     for k, ms in grupos.items():
@@ -645,6 +687,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
 
     n = creados = 0
     omesos_registre = 0
+    ya_con_borrador = set()   # clients/fils que JA tenen esborrany en aquesta passada
     for msg in lista_items:
         try:
             if msg.Class != 43:
@@ -664,6 +707,22 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                             " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                             (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
                              "", "", "", "", "", "AGRUPADO (contestado en el mail mas reciente del cliente)", ""))
+                con.commit()
+                continue
+            claves_msg = [k for k in (_clave_cliente(msg), _clave_conversacion(msg)) if k]
+            if any(k in ya_con_borrador for k in claves_msg):
+                # XARXA FINAL: aquest client ja te esborrany en aquesta passada.
+                # Com que es treballa del mes nou al mes vell, el que ja te
+                # esborrany es SEMPRE el mes recent: aquest es un germa antic.
+                print(f"\n=== {str(msg.Subject or '')[:50]}")
+                print("    AGRUPAT (xarxa): el client ja te esborrany en aquesta passada"
+                      " — es contesta al mail mes recent")
+                if not dry:
+                    marcar_agente(msg, marcar_leido=True)
+                con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                            (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
+                             "", "", "", "", "", "AGRUPADO (un solo borrador por cliente y pasada)", ""))
                 con.commit()
                 continue
             if te_marca_agente(msg):
@@ -917,6 +976,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         print("    BLOQUEJAT: no es el mail mes nou del client —"
                               " l'esborrany va al mes recent")
                         raise RuntimeError("intent d'esborrany sobre un mail agrupat")
+                    for k in claves_msg:
+                        ya_con_borrador.add(k)
                     reply = msg.Reply()
                     reply.Body = respuesta  # nomes el missatge generat, sense fil citat
                     destino_seguro = esc.get("borradores_para", "").strip()
@@ -930,6 +991,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 for lin in respuesta.split("\n"):
                     print(f"    | {lin}")
                 print("    " + "-" * 53)
+            if dry and resultado.startswith("BORRADOR"):
+                for k in claves_msg:
+                    ya_con_borrador.add(k)
             print(f"    RESULTADO -> {resultado}")
             con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
