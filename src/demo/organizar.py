@@ -11,6 +11,18 @@ Per cada mail de la carpeta indicada decideix el seu calaix i EL MOU:
 Les subcarpetes es creen soles (dins de la carpeta processada) la primera vegada.
 MOURE es reversible: els mails no s'esborren mai, nomes canvien de calaix.
 
+PACK DE CLIENT (escenario.json -> "pack_cliente": "si"):
+  Si un mateix client te DIVERSOS mails a la tanda, no es reparteixen per separat:
+  es tracten com un PAQUET i es mouen TOTS al mateix calaix, decidit pel mail MES
+  NOU (si l'ultim es desistiment, tot el pack va a 3 DESISTIMIENTO). Aixi el
+  borradores els troba junts i la seva agrupacio pot respondre nomes el mes recent
+  llegint els anteriors com a context. Sense aixo, dos mails del mateix client
+  podien acabar en calaixos diferents i generar dos esborranys cecs.
+  Salvaguarda: si un mail PREVI del pack demana persona si o si (adjunt real,
+  sospita de successio, cancelacio), el pack escala a aquell calaix encara que el
+  mes nou sigui inofensiu. Amb "pack_regla": "restrictivo" mana sempre el mes
+  restrictiu del pack (DESISTIMIENTO > DIFICIL > FACIL) en lloc del mes nou.
+
 Us (Outlook obert):
   python src\\demo\\organizar.py --outlook "NOM" --carpeta "Bandeja de entrada" --dry
   python src\\demo\\organizar.py --outlook "NOM" --carpeta "Tests Auto Cartel"
@@ -177,6 +189,73 @@ def calaix_de(destino, categoria, flags, motivo=""):
     return "DIFICIL"              # titularidad, contacto_llamada, ambiguo...
 
 
+# ---------------------------------------------------------------- PACK CLIENT
+PRIORIDAD_CALAIX = {"DESCARTES": 0, "FACIL": 1, "DIFICIL": 2, "DESISTIMIENTO": 3}
+
+
+def demana_persona(info):
+    """El mail demana ull huma si o si, encara que no sigui el mes nou del pack:
+    adjunt real, sospita de successio o voluntat de cancel.lar. Aquests no poden
+    quedar sepultats dins d'un pack marcat com a FACIL pel mail de mes amunt."""
+    if info["motivo"] == "adjunto_real" or info["destino"] == "HUMANO_SUCESION":
+        return True
+    if info["categoria"] == "cancelacion_desistimiento":
+        return True
+    flags = info["flags"] or ""
+    return "sospecha_sucesion" in flags or "cancelacion" in flags
+
+
+def decidir_pack(infos, regla="ultimo"):
+    """infos: analisis dels mails d'UN client, ordenats de mes vell a mes nou.
+    Retorna (calaix_del_pack, motiu_llegible)."""
+    if regla == "restrictivo":
+        final = max((i["calaix"] for i in infos), key=lambda c: PRIORIDAD_CALAIX[c])
+        return final, "mana el mes restrictiu del pack"
+    final = infos[-1]["calaix"]                       # per defecte: mana el mes NOU
+    motiu = "mana el mail mes nou del client"
+    durs = [i["calaix"] for i in infos[:-1] if demana_persona(i)]
+    if durs:
+        alt = max(durs, key=lambda c: PRIORIDAD_CALAIX[c])
+        if PRIORIDAD_CALAIX[alt] > PRIORIDAD_CALAIX[final]:
+            return alt, "escalat: un mail previ del client demana persona"
+    return final, motiu
+
+
+def clave_orden(info):
+    """Data de recepcio comparable (amb l'ordre de la safata com a desempat)."""
+    r = info.get("recibido")
+    try:
+        return (0, r.timestamp(), info["orden"])
+    except Exception:
+        pass
+    try:
+        return (0, float(r), info["orden"])
+    except Exception:
+        return (1, str(r), info["orden"])
+
+
+def agrupar_por_cliente(analisis, regla="ultimo"):
+    """Construeix els packs. Els DESCARTES no s'agrupen mai (no son clients) i
+    un mail sense remitent identificable queda sol (millor separat que agrupat
+    sota el reenviador equivocat). Retorna {id(msg): (calaix, motiu, pack)}."""
+    grupos = {}
+    for info in analisis:
+        if info["calaix"] == "DESCARTES" or not info["rem"] or "@" not in info["rem"]:
+            continue
+        grupos.setdefault(info["rem"], []).append(info)
+    decisiones = {}
+    packs = []
+    for cliente, infos in grupos.items():
+        if len(infos) < 2:
+            continue
+        infos.sort(key=clave_orden)
+        calaix, motiu = decidir_pack(infos, regla)
+        packs.append((cliente, infos, calaix, motiu))
+        for info in infos:
+            decisiones[id(info["msg"])] = (calaix, motiu, True)
+    return decisiones, packs
+
+
 def subcarpeta(carpeta, nombre):
     for i in range(carpeta.Folders.Count):
         f = carpeta.Folders.Item(i + 1)
@@ -222,9 +301,14 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
 
     destinos = {} if dry else {k: subcarpeta(carpeta, v) for k, v in CARPETAS.items()}
     recuento = {k: 0 for k in CARPETAS}
+    pack_on = str(esc.get("pack_cliente", "si")).lower() not in ("no", "false", "off", "0")
+    pack_regla = str(esc.get("pack_regla", "ultimo")).lower()
     # Congelar la llista abans de moure (moure mentre s'itera trenca l'index COM)
     mails = [m for m in list(carpeta.Items) if getattr(m, "Class", 0) == 43]
+    analisis = []
     n = 0
+    # ---- FASE A: analitzar-ho TOT sense moure res (cal la foto sencera de la
+    # tanda per poder veure quins mails son del mateix client) --------------
     for msg in mails:
         try:
             n += 1
@@ -271,19 +355,51 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                     flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion",
                                                   "complejo", "repregunta_insatisfecha") if c.get(k))
             calaix = calaix_de(destino, categoria, flags, motivo)
-            recuento[calaix] += 1
             print(f"  {rem[:34]:34} -> {CARPETAS[calaix]:12} ({categoria or motivo}{' ['+flags+']' if flags else ''})")
+            analisis.append({"msg": msg, "orden": n, "rem": rem, "asunto": asunto,
+                             "recibido": getattr(msg, "ReceivedTime", None),
+                             "destino": destino, "motivo": motivo, "categoria": categoria,
+                             "flags": flags, "calaix": calaix})
+        except Exception as e:
+            print(f"  ERROR analitzant un mail (es continua): {str(e)[:100]}")
+
+    # ---- FASE B: packs de client (mateix client -> mateix calaix, junts) ----
+    decisiones = {}
+    if pack_on:
+        decisiones, packs = agrupar_por_cliente(analisis, pack_regla)
+        if packs:
+            print(f"\nPACKS DE CLIENT ({len(packs)}; regla: {pack_regla}) —"
+                  " els mails d'un mateix client viatgen junts:")
+            for cliente, infos, calaix, motiu in packs:
+                print(f"  {cliente[:34]:34} {len(infos)} mails -> {CARPETAS[calaix]} ({motiu})")
+                for i, info in enumerate(infos):
+                    etiqueta = "MES NOU" if i == len(infos) - 1 else "previ   "
+                    canvi = "" if info["calaix"] == calaix else f"  [{CARPETAS[info['calaix']]} -> {CARPETAS[calaix]}]"
+                    print(f"      {etiqueta}  {str(info['asunto'])[:44]:44}{canvi}")
+        else:
+            print("\n(cap client amb diversos mails en aquesta tanda: res a empaquetar)")
+    else:
+        print("\n(packs de client DESACTIVATS a l'escenario: cada mail va pel seu compte)")
+
+    # ---- FASE C: moure i registrar amb el calaix DEFINITIU ------------------
+    for info in analisis:
+        try:
+            calaix, motiu_pack, en_pack = decisiones.get(id(info["msg"]),
+                                                         (info["calaix"], "", False))
+            recuento[calaix] += 1
             movido = 0
             if not dry:
-                msg.Move(destinos[calaix])
+                info["msg"].Move(destinos[calaix])
                 movido = 1
             con.execute("INSERT INTO organizar(ts,remitente,asunto,destino,categoria,flags,calaix,movido)"
                         " VALUES(?,?,?,?,?,?,?,?)",
-                        (datetime.now(timezone.utc).isoformat(), rem, asunto, destino,
-                         categoria, flags, calaix, movido))
+                        (datetime.now(timezone.utc).isoformat(), info["rem"], info["asunto"],
+                         info["destino"], info["categoria"],
+                         (info["flags"] + (" | PACK" if en_pack else "")).strip(" |"),
+                         calaix, movido))
             con.commit()
         except Exception as e:
-            print(f"  ERROR amb un mail (es continua): {str(e)[:100]}")
+            print(f"  ERROR movent un mail (es continua): {str(e)[:100]}")
     print("\nRepartiment: " + " · ".join(f"{CARPETAS[k]}: {v}" for k, v in recuento.items()))
     if dry:
         print("(DRY: res s'ha mogut. Treu --dry per organitzar de veritat.)")
