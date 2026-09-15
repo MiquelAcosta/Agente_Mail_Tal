@@ -16,23 +16,21 @@ sys.path.insert(0, os.path.join(AQUI, "..", "triaje"))
 sys.path.insert(0, AQUI)
 
 from borradores import (cargar_escenario, componentes_fecha, _componentes_de,
-                        fecha_texto, id_estable, es_reenviador,
+                        fecha_texto, id_estable, es_reenviador, remitente_smtp,
                         extraer_cliente_de_reenvio, te_marca_agente)
 
 
 def clave_cliente(m, reenv):
     try:
-        snd = str(getattr(m, "SenderEmailAddress", "") or "").lower()
-        if "@" not in snd or snd.startswith("/o="):
-            try:
-                snd = str(m.PropertyAccessor.GetProperty(
-                    "http://schemas.microsoft.com/mapi/proptag/0x39FE001F")).lower()
-            except Exception:
-                pass
+        snd = remitente_smtp(m)
+        crudo = str(getattr(m, "SenderEmailAddress", "") or "")[:44]
+        if not snd:
+            return None, f"remitent NO resolt (camp cru: {crudo})"
         if es_reenviador(snd, reenv):
-            return extraer_cliente_de_reenvio(str(getattr(m, "Body", "") or "")[:4000],
-                                              internos=reenv), "reenviament"
-        return (snd if "@" in snd else None), "remitent directe"
+            cli = extraer_cliente_de_reenvio(str(getattr(m, "Body", "") or "")[:4000],
+                                             internos=reenv)
+            return cli, f"reenviament de {snd}"
+        return snd, "remitent directe"
     except Exception as e:
         return None, f"error: {str(e)[:40]}"
 
@@ -45,7 +43,13 @@ def main(buzon, nombre_carpeta):
     stores = [ns.Folders.Item(i + 1) for i in range(ns.Folders.Count)]
     store = next((s for s in stores if buzon.lower() in s.Name.lower()), None)
     if store is None:
-        print(f"Cap buzon conte '{buzon}'."); return
+        print(f"Cap buzon conte '{buzon}'.")
+        print("\nBUSTIES VISIBLES a aquest Outlook:")
+        for s_ in stores:
+            print(f"   - {s_.Name}")
+        print(f"\n(L'escenario.json te configurat: "
+              f"{esc.get('agente', {}).get('buzon', '?')})")
+        return
 
     def buscar(raiz, nombre):
         for i in range(raiz.Folders.Count):
@@ -59,7 +63,14 @@ def main(buzon, nombre_carpeta):
 
     carpeta = buscar(store, nombre_carpeta)
     if carpeta is None:
-        print(f"No trobo '{nombre_carpeta}' dins de '{store.Name}'."); return
+        print(f"No trobo '{nombre_carpeta}' dins de '{store.Name}'.")
+        print("\nCARPETES de primer nivell:")
+        for i in range(store.Folders.Count):
+            f = store.Folders.Item(i + 1)
+            print(f"   - {f.Name}")
+            for j in range(f.Folders.Count):
+                print(f"       - {f.Folders.Item(j + 1).Name}")
+        return
 
     mails = [m for m in list(carpeta.Items) if getattr(m, "Class", 0) == 43]
     print("=" * 74)
@@ -81,6 +92,13 @@ def main(buzon, nombre_carpeta):
                   f" -> {fecha_texto(comp)}")
         fecha = componentes_fecha(m)
         print(f"    DATA USADA: {fecha_texto(fecha)}")
+        conv = None
+        try:
+            conv = str(getattr(m, "ConversationID", "") or "")[:28]
+        except Exception:
+            pass
+        print(f"    fil       : {conv or '(cap)'}"
+              f"   tema: {str(getattr(m, 'ConversationTopic', '') or '')[:34]}")
         print(f"    marca Agente: {'SI (quedaria fora del pack)' if marca else 'no'}")
         print(f"    id_estable: {id_estable(m)[:60]}")
         if cli and fecha and not marca:
@@ -107,9 +125,13 @@ def main(buzon, nombre_carpeta):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--outlook", metavar="NOM", required=True)
+    ap.add_argument("--outlook", metavar="BUSTIA", default=None,
+                    help="part del nom de la bustia; per defecte, la de l'escenario.json")
     ap.add_argument("--carpeta", metavar="CARPETA", default="1 FACIL")
     a = ap.parse_args()
-    main(a.outlook, a.carpeta)
+    destino = a.outlook or cargar_escenario().get("agente", {}).get("buzon", "")
+    if not destino:
+        print('Cal --outlook "part-del-nom-de-la-bustia".'); sys.exit(1)
+    main(destino, a.carpeta)
     import gc; gc.collect()
     os._exit(0)

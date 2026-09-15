@@ -334,6 +334,41 @@ def escalfar(ia):
 CATEGORIA_AGENTE = "Agente"  # etiqueta d'Outlook: marca indeleble de "ja tractat"
 
 
+def remitente_smtp(msg):
+    """Adreca SMTP REAL del remitent, o None.
+
+    Els mails interns d'Exchange tenen un SenderEmailAddress del tipus
+    /o=ExchangeLabs/ou=.../cn=... que NO es un email. Si no es resol, el mail
+    no sembla un reenviament, no s'extreu el client del cos, i l'agrupacio no
+    pot funcionar. Es prova: usuari d'Exchange -> PR_SENDER_SMTP_ADDRESS ->
+    PR_SMTP_ADDRESS -> el camp directe."""
+    try:
+        if str(getattr(msg, "SenderEmailType", "") or "") == "EX":
+            try:
+                ex = msg.Sender.GetExchangeUser()
+                if ex and ex.PrimarySmtpAddress and "@" in str(ex.PrimarySmtpAddress):
+                    return str(ex.PrimarySmtpAddress).lower()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    for prop in ("http://schemas.microsoft.com/mapi/proptag/0x5D01001F",   # PR_SENDER_SMTP_ADDRESS
+                 "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"):  # PR_SMTP_ADDRESS
+        try:
+            v = str(msg.PropertyAccessor.GetProperty(prop) or "").strip().lower()
+            if "@" in v:
+                return v
+        except Exception:
+            pass
+    try:
+        v = str(getattr(msg, "SenderEmailAddress", "") or "").strip().lower()
+        if "@" in v:
+            return v
+    except Exception:
+        pass
+    return None
+
+
 def te_marca_agente(msg):
     try:
         return CATEGORIA_AGENTE.lower() in str(msg.Categories or "").lower()
@@ -593,19 +628,17 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     # NOMES el mes recent (amb els anteriors com a context); la resta es marca.
     reenv_pre = esc.get("reenviadores", [])
     def _clave_cliente(m):
+        """Qui es el client d'aquest mail (mateixa resolucio que el bucle
+        principal: si no, l'agrupacio i el redactor parlarien de clients
+        diferents — que es exactament el que passava)."""
         try:
-            snd = str(getattr(m, "SenderEmailAddress", "") or "").lower()
-            if "@" not in snd or snd.startswith("/o="):
-                try:
-                    snd = str(m.PropertyAccessor.GetProperty(
-                        "http://schemas.microsoft.com/mapi/proptag/0x39FE001F")).lower()
-                except Exception:
-                    pass
+            snd = remitente_smtp(m)
+            if not snd:
+                return None
             if es_reenviador(snd, reenv_pre):
-                cli = extraer_cliente_de_reenvio(str(getattr(m, "Body", "") or "")[:4000],
-                                                 internos=reenv_pre)
-                return cli  # None si no s'extreu: no s'agrupa (evita agrupar reenviats aliens)
-            return snd if "@" in snd else None
+                return extraer_cliente_de_reenvio(
+                    str(getattr(m, "Body", "") or "")[:4000], internos=reenv_pre)
+            return snd
         except Exception:
             return None
 
@@ -753,11 +786,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              "", "", "", "", "", "OMITIDO (ya respondido)", ""))
                 con.commit()
                 continue
-            if msg.SenderEmailType == "EX":
-                ex = msg.Sender.GetExchangeUser()
-                rem = (ex.PrimarySmtpAddress if ex else "desconocido@exchange").lower()
-            else:
-                rem = (msg.SenderEmailAddress or "desconocido").lower()
+            rem = remitente_smtp(msg) or "desconocido"
             asunto = str(msg.Subject or "")
             cuerpo = str(msg.Body or "")[:2500]
             adjuntos = [{"nombre": str(a.FileName),
@@ -967,17 +996,33 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                   except Exception as e:
                     avisos += f" [verificador no disponible: {str(e)[:40]}]"
 
-                if dry:
+                # ULTIMA COMPROVACIO, amb la IDENTITAT DEFINITIVA del client.
+                # Fins aqui s'han fet servir claus provisionals (remitent, fil).
+                # 'rem' es qui el pipeline ha resolt de veritat — el mateix nom
+                # que surt a "BORRADOR CREADO (per a: ...)". Si aquest client ja
+                # te esborrany en aquesta passada, no se'n crea un segon.
+                claves_final = set(claves_msg)
+                _rem_norm = (rem or "").strip().lower()
+                if "@" in _rem_norm:
+                    claves_final.add("cli:" + _rem_norm)
+                print("    identitat: " + " | ".join(sorted(claves_final))[:110])
+                if claves_final & ya_con_borrador:
+                    print("    AGRUPAT (identitat final): aquest client ja te esborrany"
+                          " en aquesta passada — es contesta al mail mes recent")
+                    resultado = "AGRUPADO (un solo borrador por cliente y pasada)"
+                    if not dry:
+                        marcar_agente(msg, marcar_leido=True)
+                elif mail_id in agrupados_omitir:
+                    print("    BLOQUEJAT: no es el mail mes nou del client —"
+                          " l'esborrany va al mes recent")
+                    resultado = "AGRUPADO (no es el mail mas reciente)"
+                    if not dry:
+                        marcar_agente(msg, marcar_leido=True)
+                elif dry:
+                    ya_con_borrador |= claves_final
                     resultado = "BORRADOR (dry: no creado)" + avisos
                 else:
-                    if mail_id in agrupados_omitir:
-                        # Barrera dura: aquest mail NO es el mes nou del seu client.
-                        # Encara que hagi arribat fins aqui, no rep esborrany mai.
-                        print("    BLOQUEJAT: no es el mail mes nou del client —"
-                              " l'esborrany va al mes recent")
-                        raise RuntimeError("intent d'esborrany sobre un mail agrupat")
-                    for k in claves_msg:
-                        ya_con_borrador.add(k)
+                    ya_con_borrador |= claves_final
                     reply = msg.Reply()
                     reply.Body = respuesta  # nomes el missatge generat, sense fil citat
                     destino_seguro = esc.get("borradores_para", "").strip()
@@ -991,9 +1036,6 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 for lin in respuesta.split("\n"):
                     print(f"    | {lin}")
                 print("    " + "-" * 53)
-            if dry and resultado.startswith("BORRADOR"):
-                for k in claves_msg:
-                    ya_con_borrador.add(k)
             print(f"    RESULTADO -> {resultado}")
             con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?)",

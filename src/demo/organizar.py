@@ -165,6 +165,36 @@ def llamar(ia, system, user, timeout=240):
             print(f"    (crida fallida: {str(e)[:50]} — reintentant...)")
 
 
+def remitente_smtp(msg):
+    """Adreca SMTP REAL del remitent, o None. Els mails interns d'Exchange porten
+    un SenderEmailAddress /o=ExchangeLabs/... que no es un email; cal resoldre'l."""
+    try:
+        if str(getattr(msg, "SenderEmailType", "") or "") == "EX":
+            try:
+                ex = msg.Sender.GetExchangeUser()
+                if ex and ex.PrimarySmtpAddress and "@" in str(ex.PrimarySmtpAddress):
+                    return str(ex.PrimarySmtpAddress).lower()
+            except Exception:
+                pass
+    except Exception:
+        pass
+    for prop in ("http://schemas.microsoft.com/mapi/proptag/0x5D01001F",
+                 "http://schemas.microsoft.com/mapi/proptag/0x39FE001F"):
+        try:
+            v = str(msg.PropertyAccessor.GetProperty(prop) or "").strip().lower()
+            if "@" in v:
+                return v
+        except Exception:
+            pass
+    try:
+        v = str(getattr(msg, "SenderEmailAddress", "") or "").strip().lower()
+        if "@" in v:
+            return v
+    except Exception:
+        pass
+    return None
+
+
 def es_dominio_descartes(rem, dominios):
     rem = (rem or "").lower()
     return any(rem.endswith("@" + d) or rem.endswith("." + d) for d in dominios)
@@ -338,11 +368,8 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             n += 1
             if n > max_mails:
                 break
-            if msg.SenderEmailType == "EX":
-                ex = msg.Sender.GetExchangeUser()
-                rem = (ex.PrimarySmtpAddress if ex else "desconocido@exchange").lower()
-            else:
-                rem = (msg.SenderEmailAddress or "desconocido").lower()
+            rem_resuelto = remitente_smtp(msg)
+            rem = rem_resuelto or "desconocido"
             asunto = str(msg.Subject or "")
             cuerpo = str(msg.Body or "")[:2500]
             adjuntos = [{"nombre": str(a.FileName),
@@ -351,7 +378,7 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             mail = {"remitente": rem, "asunto": asunto, "cuerpo": cuerpo, "adjuntos": adjuntos}
 
             reenviadores = esc.get("reenviadores", [])
-            agrupable = True
+            agrupable = rem_resuelto is not None
             if es_reenviador(rem, reenviadores):
                 extraido = extraer_cliente_de_reenvio(cuerpo, internos=reenviadores)
                 if extraido:
