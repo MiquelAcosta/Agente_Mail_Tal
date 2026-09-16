@@ -359,6 +359,30 @@ def habla_de_documentos(asunto, cuerpo):
 
 CARPETA_MULTIPLES = "MULTIPLES"
 
+# Bloc intern que es posa DINS de l'esborrany perque el treballador vegi el mail
+# previ sense anar-lo a buscar. VA DELIMITAT expressament: aixi es pot esborrar
+# d'una passada, i qualsevol enviament automatic futur l'ha de treure SEMPRE
+# abans d'enviar (quitar_nota_interna) o el client el rebria.
+NOTA_INI = "===== NOTA INTERNA — ESBORRAR ABANS D'ENVIAR ====="
+NOTA_FIN = "===== FI DE LA NOTA INTERNA ====="
+CATEGORIA_NO_AUTO = "Agente-NoAuto"
+
+
+def quitar_nota_interna(texto):
+    """Treu el bloc intern d'un text d'esborrany. OBLIGATORI abans de qualsevol
+    enviament automatic."""
+    if not texto or NOTA_INI not in texto:
+        return texto
+    ini = texto.index(NOTA_INI)
+    fin = texto.find(NOTA_FIN)
+    if fin == -1:
+        return texto[:ini].strip()
+    return (texto[:ini] + texto[fin + len(NOTA_FIN):]).strip()
+
+
+def tiene_nota_interna(texto):
+    return bool(texto) and NOTA_INI in texto
+
 
 def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
     """Aparta un germa del pack a la subcarpeta MULTIPLES (es crea sola, dins de
@@ -379,6 +403,64 @@ def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
     except Exception as e:
         print(f"    (no s'ha pogut moure a {nombre}: {str(e)[:70]})")
         return False
+
+
+def mas_nuevo_en_hilo(msg, propia=""):
+    """Torna el mail MES NOU del mateix fil (si n'hi ha un de mes nou que aquest),
+    o None.
+
+    NO escaneja la bustia: fa servir la conversa que Outlook ja te muntada per a
+    cada mail — la mateixa informacio que alimenta la vista "Mostrar mensajes en
+    conversaciones". Es una consulta local i barata, per mail.
+    S'ignoren els esborranys i els correus enviats per nosaltres: nomes compten
+    els mails que ha escrit el client."""
+    try:
+        conv = msg.GetConversation()
+        if conv is None:
+            return None
+        tabla = conv.GetTable()
+    except Exception:
+        return None          # el magatzem no suporta converses: es continua sense
+    mia = componentes_fecha(msg)
+    if not mia:
+        return None
+    try:
+        mio_id = str(msg.EntryID)
+    except Exception:
+        mio_id = None
+    sess = getattr(msg, "Session", None)
+    if sess is None:
+        return None
+    propia = (propia or "").strip().lower()
+    mejor = None
+    try:
+        while not tabla.EndOfTable:
+            fila = tabla.GetNextRow()
+            try:
+                eid = str(fila("EntryID"))
+            except Exception:
+                continue
+            if mio_id and eid == mio_id:
+                continue
+            try:
+                otro = sess.GetItemFromID(eid)
+            except Exception:
+                continue
+            if getattr(otro, "Class", 0) != 43:
+                continue
+            try:
+                if getattr(otro, "Sent", True) is False:
+                    continue          # esborrany
+            except Exception:
+                pass
+            if propia and (remitente_smtp(otro) or "") == propia:
+                continue              # resposta nostra, no del client
+            f = componentes_fecha(otro)
+            if f and f > mia and (mejor is None or f > mejor[0]):
+                mejor = (f, otro)
+    except Exception:
+        return None
+    return mejor[1] if mejor else None
 
 
 def remitente_smtp(msg):
@@ -653,6 +735,20 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     if carpeta is None:
         print(f"No trobo la carpeta '{nombre_carpeta}' dins de '{store.Name}'."); return
     hist_on = str(esc.get("historial_buzon", "si")).lower() not in ("off", "no", "false", "0")
+    # Adreca del propi buzon: serveix per no confondre les NOSTRES respostes
+    # dins d'un fil amb mails nous del client.
+    buzon_propio = ""
+    try:
+        for cuenta_i in range(ns.Accounts.Count):
+            cta = ns.Accounts.Item(cuenta_i + 1)
+            if nombre_buzon.lower() in str(cta.DisplayName or "").lower() or \
+               nombre_buzon.lower() in str(cta.SmtpAddress or "").lower():
+                buzon_propio = str(cta.SmtpAddress or "").lower()
+                break
+    except Exception:
+        pass
+    if buzon_propio:
+        print(f"    (adreca del buzon: {buzon_propio})")
     inbox = _subcarpeta_por_nombres(store, {"bandeja de entrada", "inbox"}) if hist_on else None
     enviados = _subcarpeta_por_nombres(store, {"elementos enviados", "sent items", "enviados"}) if hist_on else None
     print(f"Llegint: {store.Name} > {carpeta.Name}" + ("   [MODE DRY: no es crearan esborranys]" if dry else ""))
@@ -665,11 +761,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     if filtro_fuente:
         print("    (filtre a la font: nomes mails NO llegits entren a la llista)")
     lista_items = [m for m in list(items) if getattr(m, "Class", 0) == 43]
-    # Ordre de treball: del MES NOU al mes vell. Aixi, si per qualsevol motiu
-    # l'agrupacio fallés, el primer mail que es tracta d'un client sempre es el
-    # mes recent — mai el vell.
+    # Ordre de la tanda. "antiguos" (per defecte): dels mes vells als mes nous,
+    # per anar posant al dia el backlog. Amb aquest ordre, la proteccio contra
+    # respondre un mail vell que ja te continuacio la dona la lectura del fil
+    # (mas_nuevo_en_hilo), no l'ordre.
+    orden = str(esc.get("orden_tanda", "antiguos")).lower()
     lista_items.sort(key=lambda m: componentes_fecha(m) or (0, 0, 0, 0, 0, 0),
-                     reverse=True)
+                     reverse=(orden in ("recientes", "nuevos", "desc")))
+    print(f"    ordre de la tanda: {'dels mes NOUS' if orden in ('recientes','nuevos','desc') else 'dels mes VELLS'} cap avall")
 
     # AGRUPACIO PER CLIENT: si un client te diversos mails pendents, es respon
     # NOMES el mes recent (amb els anteriors com a context); la resta es marca.
@@ -813,6 +912,30 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                              else "AGRUPADO (contestado en el mail mas reciente del cliente)", ""))
                 con.commit()
                 continue
+            # LECTURA DEL FIL: si aquest mail ja te una continuacio mes nova del
+            # client, no es contesta — s'aparta i la resposta anira al mes recent.
+            # Aixo es el que fa viable anar dels mails vells cap als nous sense
+            # escanejar la bustia sencera.
+            if str(esc.get("mirar_hilo", "si")).lower() not in ("no", "false", "off", "0"):
+                nuevo = mas_nuevo_en_hilo(msg, buzon_propio)
+                if nuevo is not None:
+                    print(f"\n=== {str(msg.Subject or '')[:50]}")
+                    print("    FIL: el client ja ha escrit mes tard en aquesta conversa"
+                          f" ({fecha_texto(componentes_fecha(nuevo))})"
+                          " — es contestara al mail mes recent")
+                    movido_h = False
+                    if not dry:
+                        marcar_agente(msg, marcar_leido=True)
+                        movido_h = mover_a_multiples(msg, carpeta)
+                        if movido_h:
+                            print(f"    -> apartat a la carpeta {CARPETA_MULTIPLES}")
+                    con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
+                                 "", "", "", "", "",
+                                 "HILO (existe un mail mas reciente del cliente)", ""))
+                    con.commit()
+                    continue
             claves_msg = [k for k in (_clave_cliente(msg), _clave_conversacion(msg)) if k]
             if any(k in ya_con_borrador for k in claves_msg):
                 # XARXA FINAL: aquest client ja te esborrany en aquesta passada.
@@ -1118,9 +1241,28 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                     ya_con_borrador |= claves_final
                     reply = msg.Reply()
-                    reply.Body = respuesta  # nomes el missatge generat, sense fil citat
+                    cuerpo_final = respuesta   # nomes el missatge generat, sense fil citat
+                    previos = contexto_grupo.get(mail_id) or []
+                    if previos:
+                        bloque = [NOTA_INI,
+                                  f"Aquest esborrany respon tambe {len(previos)} mail(s) previ(s)"
+                                  " del mateix client. Text original, per no haver d'anar a buscar-lo:"]
+                        for f_, a_, c_ in previos:
+                            bloque += ["", f"[{f_}] Assumpte: {a_}", c_]
+                        bloque += [NOTA_FIN, ""]
+                        cuerpo_final = "\n".join(bloque) + "\n" + respuesta
+                    reply.Body = cuerpo_final
                     destino_seguro = esc.get("borradores_para", "").strip()
                     reply.To = destino_seguro if destino_seguro else rem
+                    if previos:
+                        # Segell perque cap enviament automatic futur l'agafi tal qual.
+                        try:
+                            cats = [c_ for c_ in str(reply.Categories or "").split(",") if c_.strip()]
+                            if CATEGORIA_NO_AUTO not in cats:
+                                cats.append(CATEGORIA_NO_AUTO)
+                            reply.Categories = ", ".join(cats)
+                        except Exception:
+                            pass
                     reply.Save()  # <- ESBORRANY. Mai .Send()
                     marcar_agente(msg, marcar_leido=str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1"))
                     creados += 1
