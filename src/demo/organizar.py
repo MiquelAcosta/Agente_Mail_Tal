@@ -42,7 +42,7 @@ from reglas import triaje, REGEX_MATRICULA
 RUTA_ESC = os.path.join(AQUI, "escenario.json")
 
 CARPETAS = {"DESCARTES": "0 DESCARTES", "FACIL": "1 FACIL", "DIFICIL": "2 DIFICIL",
-            "DESISTIMIENTO": "3 DESISTIMIENTO"}
+            "DESISTIMIENTO": "3 DESISTIMIENTO", "ESCALADOS": "4 ESCALADOS"}
 
 CATEGORIAS_FACIL = {"estado_reclamacion", "confirmacion_documentacion",
                     "problema_web_subida", "informacion_general",
@@ -206,7 +206,9 @@ def calaix_de(destino, categoria, flags, motivo=""):
     ull huma de veritat: adjunts, successions, cancelacions, enfados, ambigus."""
     if categoria == "fuera_de_contexto" or destino in ("SISTEMA", "DESCARTE"):
         return "DESCARTES"
-    if motivo == "adjunto_real" or destino == "HUMANO_SUCESION":
+    if motivo == "adjunto_real":
+        return "ESCALADOS"          # NOMES els mails amb arxius adjunts de veritat
+    if destino == "HUMANO_SUCESION":
         return "DIFICIL"
     if categoria == "cancelacion_desistimiento" or "cancelacion" in (flags or ""):
         return "DESISTIMIENTO"    # esborrany d'acusament + tramit manual del treballador
@@ -220,7 +222,8 @@ def calaix_de(destino, categoria, flags, motivo=""):
 
 
 # ---------------------------------------------------------------- PACK CLIENT
-PRIORIDAD_CALAIX = {"DESCARTES": 0, "FACIL": 1, "DIFICIL": 2, "DESISTIMIENTO": 3}
+PRIORIDAD_CALAIX = {"DESCARTES": 0, "FACIL": 1, "DIFICIL": 2, "ESCALADOS": 2,
+                    "DESISTIMIENTO": 3}
 
 
 def demana_persona(info):

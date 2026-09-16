@@ -334,6 +334,53 @@ def escalfar(ia):
 CATEGORIA_AGENTE = "Agente"  # etiqueta d'Outlook: marca indeleble de "ja tractat"
 
 
+# Categories que parlen de documents/arxius: el client n'envia, en confirma,
+# en reclama o te problemes per pujar-los. Ampliable des de l'escenario.json amb
+# "categorias_documentos". Es desactiva tot amb "documentos_sin_borrador": "no".
+CATEGORIAS_DOCUMENTOS = {"envio_documentacion", "confirmacion_documentacion",
+                         "problema_web_subida", "falta_factura_precio"}
+
+# Frases de "ja us he enviat / us adjunto" — captura els mails que PARLEN
+# d'arxius encara que no en portin cap.
+RE_HABLA_DE_DOCUMENTOS = re.compile(
+    r"\b(adjunt\w*|anex\w*|os\s+envi\w+|les\s+envi\w+|te\s+envi\w+|ya\s+envi\w+|"
+    r"he\s+envi\w+|hemos\s+envi\w+|os\s+mand\w+|ya\s+mand\w+|he\s+mand\w+|"
+    r"he\s+subid\w+|ya\s+subid\w+|hemos\s+subid\w+|os\s+pas\w+|ya\s+pas\w+|"
+    r"document\w+|factura\w*|justificant\w*|justificante\w*|modelo\s*576|"
+    r"permiso\s+de\s+circulaci|ficha\s+t[eé]cnica|contrato\s+de\s+compra)\b",
+    re.IGNORECASE)
+
+
+def habla_de_documentos(asunto, cuerpo):
+    """(bool, motiu) — el mail gira al voltant d'arxius encara que no en porti."""
+    m = RE_HABLA_DE_DOCUMENTOS.search((asunto or "") + " " + (cuerpo or ""))
+    return (True, "menciona: " + m.group(0)[:30]) if m else (False, "")
+
+
+CARPETA_MULTIPLES = "MULTIPLES"
+
+
+def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
+    """Aparta un germa del pack a la subcarpeta MULTIPLES (es crea sola, dins de
+    la carpeta que s'esta processant). Aixi el calaix nomes conte el mail que
+    s'ha contestat i els germans queden arxivats pero localitzables.
+    Torna True si s'ha mogut."""
+    try:
+        destino = None
+        for i in range(carpeta_origen.Folders.Count):
+            f = carpeta_origen.Folders.Item(i + 1)
+            if f.Name.lower() == nombre.lower():
+                destino = f
+                break
+        if destino is None:
+            destino = carpeta_origen.Folders.Add(nombre)
+        msg.Move(destino)
+        return True
+    except Exception as e:
+        print(f"    (no s'ha pogut moure a {nombre}: {str(e)[:70]})")
+        return False
+
+
 def remitente_smtp(msg):
     """Adreca SMTP REAL del remitent, o None.
 
@@ -652,8 +699,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
         except Exception:
             pass
         try:
-            t = str(getattr(m, "ConversationTopic", "") or "").strip().lower()
-            return ("tema:" + t) if t else None
+            return None   # NOMES el fil real. L'assumpte NO serveix de pont:
+            # dos clients amb l'assumpte "Consulta" no son la mateixa persona.
         except Exception:
             return None
 
@@ -683,9 +730,27 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             _unir(claves[0], k)
         candidatos.append((m, claves))
 
-    grupos = {}
+    grupos_brutos = {}
     for m, claves in candidatos:
-        grupos.setdefault(_arrel(claves[0]), []).append(m)
+        grupos_brutos.setdefault(_arrel(claves[0]), []).append(m)
+
+    # GUARDA ANTI-BARREJA: un pack no pot contenir dos clients identificats
+    # diferents. Si el fil ha unit persones distintes (reenviaments encadenats,
+    # fils compartits), es desfa la unio i es torna a agrupar nomes per client.
+    # Val mes perdre una agrupacio que deixar un client sense resposta.
+    grupos = {}
+    for raiz, ms in grupos_brutos.items():
+        clientes = {c for c in (_clave_cliente(m) for m in ms) if c}
+        if len(clientes) <= 1:
+            grupos[raiz] = ms
+            continue
+        print(f"    (AVIS: el fil unia {len(clientes)} clients diferents"
+              f" — es desfa i s'agrupa nomes per client)")
+        for m in ms:
+            c = _clave_cliente(m)
+            if c:
+                grupos.setdefault("cli:" + c, []).append(m)
+            # sense client identificat dins d'un fil barrejat: va sol
     agrupados_omitir = {}   # mail_id -> mail_id del guanyador
     contexto_grupo = {}     # mail_id guanyador -> [(fecha, asunto, extracte), ...]
     for k, ms in grupos.items():
@@ -714,9 +779,6 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     if agrupados_omitir:
         print(f"    (agrupacio: {len(contexto_grupo)} clients amb multiples mails;"
               f" {len(agrupados_omitir)} mails es contesten dins del mes recent)")
-    if agrupados_omitir:
-        print(f"    (agrupacio: {len(contexto_grupo)} clients amb multiples mails;"
-              f" {len(agrupados_omitir)} mails es contesten dins del mes recent)")
 
     n = creados = 0
     omesos_registre = 0
@@ -735,11 +797,20 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             if mail_id in agrupados_omitir:
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    AGRUPAT: es contesta dins del mail mes recent del mateix client")
-                marcar_agente(msg, marcar_leido=True)
+                movido_mult = False
+                if not dry:
+                    marcar_agente(msg, marcar_leido=True)
+                    # El germa no es queda al calaix: s'aparta a MULTIPLES, aixi
+                    # el calaix nomes conte el mail que s'ha contestat.
+                    movido_mult = mover_a_multiples(msg, carpeta)
+                    if movido_mult:
+                        print(f"    -> apartat a la carpeta {CARPETA_MULTIPLES}")
                 con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                             " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                             (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
-                             "", "", "", "", "", "AGRUPADO (contestado en el mail mas reciente del cliente)", ""))
+                             "", "", "", "", "",
+                             "AGRUPADO -> " + CARPETA_MULTIPLES if movido_mult
+                             else "AGRUPADO (contestado en el mail mas reciente del cliente)", ""))
                 con.commit()
                 continue
             claves_msg = [k for k in (_clave_cliente(msg), _clave_conversacion(msg)) if k]
@@ -836,8 +907,18 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                                   for d in esc.get("dominios_descartes", [])]
             if es_dominio_descartes(rem, dominios):
                 destino, motivo = "DESCARTE", "dominio_no_cliente"
+            docs_off = str(esc.get("documentos_sin_borrador", "si")).lower() not in ("no", "false", "off", "0")
             sin_borrador = (destino in ("SISTEMA", "DESCARTE")) or (motivo == "adjunto_real")
-            if sin_borrador:
+            motivo_docs = ""
+            if docs_off and not sin_borrador:
+                # Porta 1: parla d'arxius encara que no en porti cap
+                habla, det = habla_de_documentos(asunto, cuerpo)
+                if habla:
+                    sin_borrador, motivo_docs = True, det
+            if sin_borrador and motivo_docs:
+                resultado = f"DOCUMENTOS ({motivo_docs}) — SENSE esborrany (ho mira una persona)"
+                print(f"    SENSE ESBORRANY: el mail parla d'arxius ({motivo_docs})")
+            elif sin_borrador:
                 resultado = destino + f" ({motivo}) — SENSE esborrany (per disseny)"
             else:
                 # Historial real del buzon amb aquest client (abans de classificar: el fa servir)
@@ -870,6 +951,19 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     categoria = "ambiguo"
                 if categoria == "fuera_de_contexto":
                     resultado = "DESCARTE (fuera_de_contexto per IA) — SENSE esborrany"
+                    print(f"    RESULTADO -> {resultado}")
+                    con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                 categoria, flags, "", "", "", resultado, ""))
+                    con.commit()
+                    continue
+                cats_doc = CATEGORIAS_DOCUMENTOS | {c_.strip().lower() for c_ in
+                                                    esc.get("categorias_documentos", [])}
+                if docs_off and categoria in cats_doc:
+                    # Porta 2: el classificador diu que el tema SON els documents.
+                    resultado = f"DOCUMENTOS (categoria {categoria}) — SENSE esborrany (ho mira una persona)"
+                    print(f"    SENSE ESBORRANY: categoria de documents ({categoria})")
                     print(f"    RESULTADO -> {resultado}")
                     con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                                 " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
