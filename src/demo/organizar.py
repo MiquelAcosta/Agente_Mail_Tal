@@ -222,8 +222,11 @@ def calaix_de(destino, categoria, flags, motivo=""):
 
 
 # ---------------------------------------------------------------- PACK CLIENT
-PRIORIDAD_CALAIX = {"DESCARTES": 0, "FACIL": 1, "DIFICIL": 2, "ESCALADOS": 2,
-                    "DESISTIMIENTO": 3}
+# Escala de "com de seriosament ho ha de mirar una persona". ESCALADOS ha d'estar
+# PER SOBRE de DIFICIL: si no, un pack amb arxiu es quedava a DIFICIL i l'arxiu
+# desapareixia de la vista de qui l'havia de mirar.
+PRIORIDAD_CALAIX = {"DESCARTES": 0, "FACIL": 1, "DIFICIL": 2, "ESCALADOS": 3,
+                    "DESISTIMIENTO": 4}
 
 
 def demana_persona(info):
@@ -375,9 +378,18 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             rem = rem_resuelto or "desconocido"
             asunto = str(msg.Subject or "")
             cuerpo = str(msg.Body or "")[:2500]
-            adjuntos = [{"nombre": str(a.FileName),
-                         "is_inline": str(a.FileName).lower().startswith("image00"),
-                         "bytes": getattr(a, "Size", 0)} for a in msg.Attachments]
+            adjuntos = []
+            try:
+                for a in msg.Attachments:
+                    try:
+                        nom_a = str(a.FileName)
+                    except Exception:
+                        nom_a = "(sense nom)"
+                    adjuntos.append({"nombre": nom_a,
+                                     "is_inline": nom_a.lower().startswith("image00"),
+                                     "bytes": getattr(a, "Size", 0)})
+            except Exception as e:
+                print(f"    (no s'han pogut llegir els adjunts: {str(e)[:60]})")
             mail = {"remitente": rem, "asunto": asunto, "cuerpo": cuerpo, "adjuntos": adjuntos}
 
             reenviadores = esc.get("reenviadores", [])
@@ -416,6 +428,16 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                                                   "complejo", "repregunta_insatisfecha") if c.get(k))
             calaix = calaix_de(destino, categoria, flags, motivo)
             print(f"  {rem[:34]:34} -> {CARPETAS[calaix]:12} ({categoria or motivo}{' ['+flags+']' if flags else ''})")
+            if adjuntos:
+                detalle = "; ".join(f"{a['nombre'][:24]} {a['bytes']}B"
+                                    + (" INLINE" if a["is_inline"] else "")
+                                    for a in adjuntos[:4])
+                print(f"      adjunts vistos: {len(adjuntos)} -> {detalle}")
+                print(f"      triaje diu: destino={destino} motivo={motivo}"
+                      f" -> calaix {CARPETAS[calaix]}")
+                if motivo != "adjunto_real":
+                    print("      ATENCIO: portava adjunts pero el triaje NO els ha"
+                          " considerat reals (mira 'INLINE' o la mida)")
             analisis.append({"msg": msg, "orden": n, "rem": rem, "asunto": asunto,
                              "agrupable": agrupable,
                              "recibido": fecha_mail(msg),

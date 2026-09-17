@@ -403,6 +403,21 @@ def tiene_nota_interna(texto):
     return bool(texto) and NOTA_INI in texto
 
 
+def tiene_adjuntos_reales(msg, min_bytes=8000):
+    """True si el mail porta arxius de veritat (no firmes ni imatges incrustades)."""
+    try:
+        for i in range(msg.Attachments.Count):
+            a = msg.Attachments.Item(i + 1)
+            nom = str(getattr(a, "FileName", "") or "").lower()
+            if nom.endswith((".png", ".gif", ".jpg", ".jpeg", ".bmp")) and \
+               int(getattr(a, "Size", 0) or 0) < min_bytes:
+                continue          # imatge de firma
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
     """Aparta un germa del pack a la subcarpeta MULTIPLES (es crea sola, dins de
     la carpeta que s'esta processant). Aixi el calaix nomes conte el mail que
@@ -417,7 +432,18 @@ def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
                 break
         if destino is None:
             destino = carpeta_origen.Folders.Add(nombre)
-        msg.Move(destino)
+        movido = msg.Move(destino)
+        # Verificacio: confirmar ON ha acabat de veritat. Si Outlook el posa en
+        # un altre lloc (regles, neteja de converses), ha de quedar escrit.
+        try:
+            donde = str(movido.Parent.Name)
+            if donde.lower() != nombre.lower():
+                print(f"    ATENCIO: el mail ha acabat a '{donde}', no a '{nombre}'."
+                      " Reviseu regles d'Outlook o la neteja de converses.")
+            else:
+                print(f"    (verificat: ara es a {donde})")
+        except Exception:
+            pass
         return True
     except Exception as e:
         print(f"    (no s'ha pogut moure a {nombre}: {str(e)[:70]})")
@@ -916,6 +942,12 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
                 print("    AGRUPAT: es contesta dins del mail mes recent del mateix client")
                 movido_mult = False
+                if tiene_adjuntos_reales(msg):
+                    print("    PORTA ARXIUS: NO s'aparta ni es marca —"
+                          " ha de quedar visible per a una persona")
+                    print("    RESULTADO -> ESCALADO (adjunto en mail agrupado)")
+                    con.commit()
+                    continue
                 if not dry:
                     marcar_agente(msg, marcar_leido=True)
                     # El germa no es queda al calaix: s'aparta a MULTIPLES, aixi
@@ -943,7 +975,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                           f" ({fecha_texto(componentes_fecha(nuevo))})"
                           " — es contestara al mail mes recent")
                     movido_h = False
-                    if not dry:
+                    if tiene_adjuntos_reales(msg):
+                        print("    PORTA ARXIUS: NO s'aparta ni es marca —"
+                              " ha de quedar visible per a una persona")
+                    elif not dry:
                         marcar_agente(msg, marcar_leido=True)
                         movido_h = mover_a_multiples(msg, carpeta)
                         if movido_h:
