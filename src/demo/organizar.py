@@ -165,6 +165,13 @@ def llamar(ia, system, user, timeout=240):
             print(f"    (crida fallida: {str(e)[:50]} — reintentant...)")
 
 
+try:
+    from borradores import habla_de_documentos
+except Exception:          # si no es pot importar, no es bloqueja res
+    def habla_de_documentos(asunto, cuerpo):
+        return False, ""
+
+
 def remitente_smtp(msg):
     """Adreca SMTP REAL del remitent, o None. Els mails interns d'Exchange porten
     un SenderEmailAddress /o=ExchangeLabs/... que no es un email; cal resoldre'l."""
@@ -233,7 +240,7 @@ def demana_persona(info):
     """El mail demana ull huma si o si, encara que no sigui el mes nou del pack:
     adjunt real, sospita de successio o voluntat de cancel.lar. Aquests no poden
     quedar sepultats dins d'un pack marcat com a FACIL pel mail de mes amunt."""
-    if info["motivo"] == "adjunto_real" or info["destino"] == "HUMANO_SUCESION":
+    if info["destino"] == "HUMANO_SUCESION":
         return True
     if info["categoria"] == "cancelacion_desistimiento":
         return True
@@ -427,6 +434,17 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                     flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion",
                                                   "complejo", "repregunta_insatisfecha") if c.get(k))
             calaix = calaix_de(destino, categoria, flags, motivo)
+            docs_on = str(esc.get("documentos_a_escalados", "si")).lower() not in ("no", "false", "off", "0")
+            if docs_on and motivo != "adjunto_real":
+                habla, det_doc = habla_de_documentos(asunto, cuerpo)
+                if habla:
+                    calaix = "ESCALADOS"
+                    print(f"      PARLA DE DOCUMENTS ({det_doc}) -> {CARPETAS[calaix]}")
+            # Els mails de documents (amb arxiu o parlant-ne) NO entren en packs:
+            # van sols a ESCALADOS i no arrosseguen la resta de mails del client,
+            # que son temes diferents amb resposta propia.
+            if calaix == "ESCALADOS":
+                agrupable = False
             print(f"  {rem[:34]:34} -> {CARPETAS[calaix]:12} ({categoria or motivo}{' ['+flags+']' if flags else ''})")
             if adjuntos:
                 detalle = "; ".join(f"{a['nombre'][:24]} {a['bytes']}B"
