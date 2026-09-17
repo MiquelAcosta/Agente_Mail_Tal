@@ -368,6 +368,25 @@ NOTA_FIN = "===== FI DE LA NOTA INTERNA ====="
 CATEGORIA_NO_AUTO = "Agente-NoAuto"
 
 
+def _insertar_arriba_html(html_original, texto_plano):
+    """Posa el text nou A DALT d'una resposta HTML d'Outlook, conservant el fil
+    citat que Outlook ja ha muntat a sota. Si no es pot, torna None."""
+    if not html_original:
+        return None
+    try:
+        import html as _html
+        bloque = ("<div style=\"font-family:Calibri,sans-serif;font-size:11pt\">"
+                  + _html.escape(texto_plano).replace("\n", "<br>")
+                  + "</div><br>")
+        m = re.search(r"<body[^>]*>", html_original, re.IGNORECASE)
+        if m:
+            i = m.end()
+            return html_original[:i] + bloque + html_original[i:]
+        return bloque + html_original
+    except Exception:
+        return None
+
+
 def quitar_nota_interna(texto):
     """Treu el bloc intern d'un text d'esborrany. OBLIGATORI abans de qualsevol
     enviament automatic."""
@@ -1251,7 +1270,29 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                             bloque += ["", f"[{f_}] Assumpte: {a_}", c_]
                         bloque += [NOTA_FIN, ""]
                         cuerpo_final = "\n".join(bloque) + "\n" + respuesta
-                    reply.Body = cuerpo_final
+                    citar = str(esc.get("citar_original", "si")).lower() not in ("no", "false", "off", "0")
+                    escrito = False
+                    if citar:
+                        # Outlook ja ha muntat la resposta amb el mail del client
+                        # citat a sota: nomes cal posar el text nou a dalt.
+                        try:
+                            nuevo_html = _insertar_arriba_html(reply.HTMLBody, cuerpo_final)
+                        except Exception:
+                            nuevo_html = None
+                        if nuevo_html:
+                            try:
+                                reply.HTMLBody = nuevo_html
+                                escrito = True
+                            except Exception:
+                                escrito = False
+                        if not escrito:
+                            try:
+                                reply.Body = cuerpo_final + "\n\n" + str(reply.Body or "")
+                                escrito = True
+                            except Exception:
+                                escrito = False
+                    if not escrito:
+                        reply.Body = cuerpo_final   # nomes el missatge generat
                     destino_seguro = esc.get("borradores_para", "").strip()
                     reply.To = destino_seguro if destino_seguro else rem
                     if previos:
