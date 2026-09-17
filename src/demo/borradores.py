@@ -342,19 +342,34 @@ CATEGORIAS_DOCUMENTOS = {"envio_documentacion", "confirmacion_documentacion",
 
 # Frases de "ja us he enviat / us adjunto" — captura els mails que PARLEN
 # d'arxius encara que no en portin cap.
-RE_HABLA_DE_DOCUMENTOS = re.compile(
-    r"\b(adjunt\w*|anex\w*|os\s+envi\w+|les\s+envi\w+|te\s+envi\w+|ya\s+envi\w+|"
-    r"he\s+envi\w+|hemos\s+envi\w+|os\s+mand\w+|ya\s+mand\w+|he\s+mand\w+|"
-    r"he\s+subid\w+|ya\s+subid\w+|hemos\s+subid\w+|os\s+pas\w+|ya\s+pas\w+|"
-    r"document\w+|factura\w*|justificant\w*|justificante\w*|modelo\s*576|"
-    r"permiso\s+de\s+circulaci|ficha\s+t[eé]cnica|contrato\s+de\s+compra)\b",
-    re.IGNORECASE)
+# Senyal FORT per si sol: "os adjunto", "se adjunta", "adjuntamos"...
+RE_DOC_FUERTE = re.compile(r"\b(adjunt[oa]s?|adjuntamos|adjuntando|anexo|anexamos)\b",
+                           re.IGNORECASE)
+# Senyal DEBIL: nomes compta si hi ha un verb d'enviar I un nom de document.
+RE_DOC_VERBO = re.compile(
+    r"\b(envi[eéoó]\w*|envia\w+|mand[eéoó]\w*|manda\w+|sub[ií]\w*|"
+    r"remit[ií]\w*|pas[eéoó]\w*|aport[eéoó]\w*|entregu[eé]\w*)\b", re.IGNORECASE)
+RE_DOC_NOMBRE = re.compile(
+    r"\b(document\w+|factura\w*|papel\w+|archiv\w+|fichero\w*|justificant\w*|"
+    r"pdf|foto\w*|copia\w*|dni|nie|permiso\s+de\s+circulaci\w+|ficha\s+t[eé]cnica|"
+    r"contrato\s+de\s+compra|modelo\s*576|escritura\w*)\b", re.IGNORECASE)
 
 
 def habla_de_documentos(asunto, cuerpo):
-    """(bool, motiu) — el mail gira al voltant d'arxius encara que no en porti."""
-    m = RE_HABLA_DE_DOCUMENTOS.search((asunto or "") + " " + (cuerpo or ""))
-    return (True, "menciona: " + m.group(0)[:30]) if m else (False, "")
+    """(bool, motiu) — el mail gira al voltant d'arxius encara que no en porti.
+
+    Cal un senyal FORT ("os adjunto") o bé un verb d'enviar JUNT amb un nom de
+    document ("ya os envie la factura"). Nomes el verb no compta: "os envio un
+    saludo" no parla de documents."""
+    t = (asunto or "") + " " + (cuerpo or "")
+    m = RE_DOC_FUERTE.search(t)
+    if m:
+        return True, "menciona: " + m.group(0)[:30]
+    v = RE_DOC_VERBO.search(t)
+    n = RE_DOC_NOMBRE.search(t)
+    if v and n:
+        return True, f"menciona: {v.group(0)[:16]} + {n.group(0)[:16]}"
+    return False, ""
 
 
 CARPETA_MULTIPLES = "MULTIPLES"
@@ -927,6 +942,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     n = creados = 0
     omesos_registre = 0
     ya_con_borrador = set()   # clients/fils que JA tenen esborrany en aquesta passada
+    motivos_sin = {}          # per que NO s'ha redactat cada mail
+
+    def _apunta(motivo):
+        motivos_sin[motivo] = motivos_sin.get(motivo, 0) + 1
     for msg in lista_items:
         try:
             if msg.Class != 43:
@@ -940,6 +959,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 break
             if mail_id in agrupados_omitir:
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
+                _apunta("agrupat: es contesta al mail mes recent")
                 print("    AGRUPAT: es contesta dins del mail mes recent del mateix client")
                 movido_mult = False
                 if tiene_adjuntos_reales(msg):
@@ -967,10 +987,21 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             # client, no es contesta — s'aparta i la resposta anira al mes recent.
             # Aixo es el que fa viable anar dels mails vells cap als nous sense
             # escanejar la bustia sencera.
-            if str(esc.get("mirar_hilo", "si")).lower() not in ("no", "false", "off", "0"):
+            mirar = str(esc.get("mirar_hilo", "si")).lower() not in ("no", "false", "off", "0")
+            if mirar and not buzon_propio:
+                # Sense saber la nostra adreca no podem distingir una resposta
+                # NOSTRA dins del fil d'un mail nou del client: tot semblaria
+                # "ja contestat" i no es redactaria res. Millor no mirar el fil.
+                if not globals().get("_aviso_hilo_dado"):
+                    print("    (lectura del fil DESACTIVADA: no s'ha pogut determinar"
+                          " l'adreca del buzon)")
+                    globals()["_aviso_hilo_dado"] = True
+                mirar = False
+            if mirar:
                 nuevo = mas_nuevo_en_hilo(msg, buzon_propio)
                 if nuevo is not None:
                     print(f"\n=== {str(msg.Subject or '')[:50]}")
+                    _apunta("fil: hi ha un mail mes nou del client")
                     print("    FIL: el client ja ha escrit mes tard en aquesta conversa"
                           f" ({fecha_texto(componentes_fecha(nuevo))})"
                           " — es contestara al mail mes recent")
@@ -996,6 +1027,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 # Com que es treballa del mes nou al mes vell, el que ja te
                 # esborrany es SEMPRE el mes recent: aquest es un germa antic.
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
+                _apunta("agrupat: el client ja te esborrany")
                 print("    AGRUPAT (xarxa): el client ja te esborrany en aquesta passada"
                       " — es contesta al mail mes recent")
                 if not dry:
@@ -1008,6 +1040,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 continue
             if te_marca_agente(msg):
                 print(f"\n=== {str(msg.Subject or '')[:50]}")
+                _apunta("ja portava la marca Agente")
                 print("    OMES: porta la marca 'Agente' (ja tractat, marca al propi mail)")
                 con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                             " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -1093,9 +1126,11 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if habla:
                     sin_borrador, motivo_docs = True, det
             if sin_borrador and motivo_docs:
+                _apunta("parla d'arxius")
                 resultado = f"DOCUMENTOS ({motivo_docs}) — SENSE esborrany (ho mira una persona)"
                 print(f"    SENSE ESBORRANY: el mail parla d'arxius ({motivo_docs})")
             elif sin_borrador:
+                _apunta(f"triaje: {motivo}")
                 resultado = destino + f" ({motivo}) — SENSE esborrany (per disseny)"
             else:
                 # Historial real del buzon amb aquest client (abans de classificar: el fa servir)
@@ -1140,6 +1175,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if docs_off and categoria in cats_doc:
                     # Porta 2: el classificador diu que el tema SON els documents.
                     resultado = f"DOCUMENTOS (categoria {categoria}) — SENSE esborrany (ho mira una persona)"
+                    _apunta(f"categoria de documents ({categoria})")
                     print(f"    SENSE ESBORRANY: categoria de documents ({categoria})")
                     print(f"    RESULTADO -> {resultado}")
                     con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
@@ -1357,6 +1393,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
         except Exception as e:
             print(f"    ERROR con este mail (se continua): {str(e)[:120]}")
     extra = f" ({omesos_registre} omesos en silenci: ja al registre)" if omesos_registre else ""
+    if motivos_sin:
+        print("\n    PER QUE NO S'HA REDACTAT (recompte):")
+        for mot, cnt in sorted(motivos_sin.items(), key=lambda p: -p[1]):
+            print(f"       {cnt:4}  {mot}")
     print(f"\nFet: {min(n, max_mails)} mails processats, {creados} esborranys creats.{extra}" if not dry
           else f"\nFet (dry): {min(n, max_mails)} mails processats, 0 esborranys (mode assaig).{extra}")
 
