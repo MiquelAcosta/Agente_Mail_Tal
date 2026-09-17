@@ -372,7 +372,7 @@ def habla_de_documentos(asunto, cuerpo):
     return False, ""
 
 
-CARPETA_MULTIPLES = "MULTIPLES"
+CARPETA_MULTIPLES = "MULTIPLES"   # nom configurable: "carpeta_multiples"
 
 # Bloc intern que es posa DINS de l'esborrany perque el treballador vegi el mail
 # previ sense anar-lo a buscar. VA DELIMITAT expressament: aixi es pot esborrar
@@ -400,6 +400,37 @@ def _insertar_arriba_html(html_original, texto_plano):
         return bloque + html_original
     except Exception:
         return None
+
+
+def cita_propia(msg, max_chars=4000):
+    """Construeix la citacio del mail original pel nostre compte.
+
+    Outlook no sempre inclou el text original en una resposta: depen de la
+    configuracio ("No incluir el mensaje original"), del format del mail i de si
+    el cos es va quedar buit. Si falta, la posem nosaltres: el treballador ha de
+    poder llegir que deia el client sense sortir de l'esborrany."""
+    try:
+        de = remitente_smtp(msg) or str(getattr(msg, "SenderName", "") or "")
+        cuando = fecha_texto(componentes_fecha(msg))
+        asunto = str(getattr(msg, "Subject", "") or "")
+        cuerpo = str(getattr(msg, "Body", "") or "")[:max_chars]
+    except Exception:
+        return ""
+    return ("\n\n-----------------------------------------------\n"
+            f"De: {de}\nEnviado: {cuando}\nAsunto: {asunto}\n\n{cuerpo}")
+
+
+def falta_la_cita(texto_respuesta, msg):
+    """True si al cos de l'esborrany no hi ha rastre del mail del client."""
+    try:
+        original = str(getattr(msg, "Body", "") or "").strip()
+    except Exception:
+        return False
+    if len(original) < 25:
+        return False          # mail sense cos: no hi ha res a citar
+    # Es busca un tros significatiu del text original dins de l'esborrany.
+    trozo = " ".join(original.split())[:40]
+    return trozo not in " ".join((texto_respuesta or "").split())
 
 
 def quitar_nota_interna(texto):
@@ -433,20 +464,31 @@ def tiene_adjuntos_reales(msg, min_bytes=8000):
     return False
 
 
+def _buscar_o_crear(padre, nombre):
+    for i in range(padre.Folders.Count):
+        f = padre.Folders.Item(i + 1)
+        if f.Name.lower() == nombre.lower():
+            return f
+    return padre.Folders.Add(nombre)
+
+
 def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
-    """Aparta un germa del pack a la subcarpeta MULTIPLES (es crea sola, dins de
-    la carpeta que s'esta processant). Aixi el calaix nomes conte el mail que
-    s'ha contestat i els germans queden arxivats pero localitzables.
-    Torna True si s'ha mogut."""
+    """Aparta un germa del pack a la carpeta MULTIPLES.
+
+    N'hi ha UNA de sola per a tota la bustia: es crea al costat dels calaixos
+    (germana de '1 FACIL', '2 DIFICIL'...), no dins de cadascun. Aixi el
+    treballador te un unic lloc on mirar, vinguin els mails del calaix que
+    vinguin. Torna True si s'ha mogut."""
     try:
         destino = None
-        for i in range(carpeta_origen.Folders.Count):
-            f = carpeta_origen.Folders.Item(i + 1)
-            if f.Name.lower() == nombre.lower():
-                destino = f
-                break
-        if destino is None:
-            destino = carpeta_origen.Folders.Add(nombre)
+        try:
+            padre = carpeta_origen.Parent      # la carpeta que conte els calaixos
+            if padre is not None:
+                destino = _buscar_o_crear(padre, nombre)
+        except Exception:
+            destino = None
+        if destino is None:                    # sense pare accessible: dins del calaix
+            destino = _buscar_o_crear(carpeta_origen, nombre)
         movido = msg.Move(destino)
         # Verificacio: confirmar ON ha acabat de veritat. Si Outlook el posa en
         # un altre lloc (regles, neteja de converses), ha de quedar escrit.
@@ -951,9 +993,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             if msg.Class != 43:
                 continue
             mail_id = id_estable(msg)
-            if con.execute("SELECT 1 FROM borradores WHERE mail_id=?", (mail_id,)).fetchone():
+            ya_registrado = bool(con.execute(
+                "SELECT 1 FROM borradores WHERE mail_id=?", (mail_id,)).fetchone())
+            if ya_registrado and mail_id not in agrupados_omitir:
                 omesos_registre += 1
                 continue
+            # Un germa d'un pack NO se salta pel registre: encara que ja hi
+            # constes, s'ha d'apartar a MULTIPLES. Si no, el mail es queda per
+            # sempre al calaix i la carpeta no es crea mai.
             n += 1
             if n > max_mails:
                 break
@@ -968,11 +1015,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print("    RESULTADO -> ESCALADO (adjunto en mail agrupado)")
                     con.commit()
                     continue
+                if ya_registrado:
+                    print("    (ja constava al registre: igualment s'aparta)")
                 if not dry:
                     marcar_agente(msg, marcar_leido=True)
                     # El germa no es queda al calaix: s'aparta a MULTIPLES, aixi
                     # el calaix nomes conte el mail que s'ha contestat.
                     movido_mult = mover_a_multiples(msg, carpeta)
+                else:
+                    print(f"    (DRY: no es mou res; en real aniria a {CARPETA_MULTIPLES})")
                     if movido_mult:
                         print(f"    -> apartat a la carpeta {CARPETA_MULTIPLES}")
                 con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
@@ -1205,7 +1256,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print(f"    {cartel_info[:90]}...")
 
                 # Plantilla: la de la categoria; sense fitxa, la de clients nous
-                plantillas_on = str(esc.get("plantillas", "si")).lower() not in ("no", "off", "false", "0")
+                plantillas_on = str(esc.get("plantillas", "no")).lower() not in ("no", "off", "false", "0")
                 pl = PLANTILLAS.get(categoria, {}) if plantillas_on else {}
                 guia = ""
                 if pl.get("guia"):
@@ -1364,6 +1415,20 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                 escrito = False
                     if not escrito:
                         reply.Body = cuerpo_final   # nomes el missatge generat
+                    if citar:
+                        # Comprovacio: Outlook ha inclos de veritat el mail del
+                        # client? Si no, el posem nosaltres.
+                        try:
+                            actual = str(reply.Body or "")
+                        except Exception:
+                            actual = ""
+                        if falta_la_cita(actual, msg):
+                            try:
+                                reply.Body = actual + cita_propia(msg)
+                                print("    (citacio afegida pel nostre compte:"
+                                      " Outlook no havia inclos el mail original)")
+                            except Exception as e:
+                                print(f"    (no s'ha pogut citar l'original: {str(e)[:50]})")
                     destino_seguro = esc.get("borradores_para", "").strip()
                     reply.To = destino_seguro if destino_seguro else rem
                     if previos:
@@ -1437,7 +1502,7 @@ if __name__ == "__main__":
     print(" Font de fitxes:", bbdd.modo, "| Aquest programa NO pot enviar res.")
     filtro_leidos = str(esc.get("solo_no_leidos", "si")).lower() not in ("no", "false", "off", "0")
     marcar_l = str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1")
-    plant_on = str(esc.get("plantillas", "si")).lower() not in ("no", "off", "false", "0")
+    plant_on = str(esc.get("plantillas", "no")).lower() not in ("no", "off", "false", "0")
     print(" Plantilles al redactor:", "SI" if plant_on else "NO (pur agent: nomes dades + regles)")
     print(" Filtre nomes-no-llegits:", "ACTIU" if filtro_leidos else "INACTIU",
           "| Marca 'Agente': sempre | Esborrany fet -> marcar llegit:", "SI" if marcar_l else "NO")
