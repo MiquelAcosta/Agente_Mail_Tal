@@ -45,6 +45,28 @@ DOMINIOS_DESCARTES_BASE = [
 ]
 
 
+def escoger_buzon(stores, nombre):
+    """Tria la bustia. PRIORITAT: nom exacte -> comenca per -> conte.
+
+    Sense aixo, 'info@recuperatudinero.com' tambe coincideix amb
+    'Online Archive - info@recuperatudinero.com', i com que l'arxiu surt abans a
+    la llista guanyava ell i no es trobava cap calaix. Si queda ambigu, s'avisa."""
+    n = (nombre or "").strip().lower()
+    noms = [str(getattr(s, "Name", "") or "") for s in stores]
+    for prova in (lambda x: x.lower() == n, lambda x: x.lower().startswith(n)):
+        tri = [s for s, x in zip(stores, noms) if prova(x)]
+        if tri:
+            return tri[0]
+    conte = [s for s, x in zip(stores, noms) if n in x.lower()]
+    if not conte:
+        return None
+    if len(conte) > 1:
+        print(f"    (AVIS: {len(conte)} busties contenen '{nombre}': "
+              + ", ".join(str(getattr(c, "Name", "")) for c in conte) + ")")
+        print(f"    (s'usa '{getattr(conte[0], 'Name', '')}' — poseu el nom exacte)")
+    return conte[0]
+
+
 def es_dominio_descartes(rem, dominios):
     rem = (rem or "").lower()
     return any(rem.endswith("@" + d) or rem.endswith("." + d) for d in dominios)
@@ -867,7 +889,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     ia = esc["ia"]
     ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
     stores = [ns.Folders.Item(i + 1) for i in range(ns.Folders.Count)]
-    store = next((s for s in stores if nombre_buzon.lower() in s.Name.lower()), None)
+    store = escoger_buzon(stores, nombre_buzon)
     if store is None:
         print(f"Cap buzon conte '{nombre_buzon}'. Visibles: " + ", ".join(s.Name for s in stores)); return
 
@@ -1572,7 +1594,7 @@ if __name__ == "__main__":
         import win32com.client
         ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
         stores = [ns.Folders.Item(i + 1) for i in range(ns.Folders.Count)]
-        store = next((s for s in stores if args.outlook.lower() in s.Name.lower()), None)
+        store = escoger_buzon(stores, args.outlook)
         def _buscar(raiz, nombre):
             for i in range(raiz.Folders.Count):
                 f = raiz.Folders.Item(i + 1)
