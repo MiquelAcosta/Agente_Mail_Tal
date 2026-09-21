@@ -32,7 +32,7 @@ Us (Outlook obert):
 Registre: src\\demo\\log_organizar.sqlite
 """
 import json, os, sys, sqlite3, urllib.request, argparse
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(AQUI, "..", "triaje"))
@@ -170,6 +170,46 @@ try:
 except Exception:          # si no es pot importar, no es bloqueja res
     def habla_de_documentos(asunto, cuerpo):
         return False, ""
+
+
+def mails_de_carpeta(carpeta, orden="antiguos", limite=50, dias=0):
+    """Treu els mails d'una carpeta SENSE carregar-la sencera a memoria.
+
+    list(carpeta.Items) materialitza un objecte COM per cada correu: amb milers,
+    l'Outlook (32 bits) es queda sense recursos i cau ("Out of memory or system
+    resources"). Aqui es demana a Outlook que ORDENI ell (rapid, ho fa sobre la
+    seva taula) i despres es recorre amb GetFirst/GetNext agafant NOMES els que
+    calen. La memoria usada depen del limit, no de la mida de la bustia.
+
+    dias > 0 limita a mes a mes la finestra temporal (Restrict), cosa que redueix
+    encara mes el treball d'Outlook."""
+    items = carpeta.Items
+    desc = orden in ("recientes", "nuevos", "desc")
+    if dias and int(dias) > 0:
+        try:
+            desde = (datetime.now() - timedelta(days=int(dias))).strftime("%m/%d/%Y %I:%M %p")
+            items = items.Restrict(f"[ReceivedTime] >= '{desde}'")
+        except Exception as e:
+            print(f"    (no s'ha pogut limitar per dies: {str(e)[:60]})")
+    try:
+        items.Sort("[ReceivedTime]", desc)     # ordena Outlook, no Python
+    except Exception as e:
+        print(f"    (Outlook no ha pogut ordenar: {str(e)[:60]} — ordre natural)")
+    out = []
+    try:
+        m = items.GetFirst()
+        while m is not None and len(out) < limite:
+            try:
+                if getattr(m, "Class", 0) == 43:
+                    out.append(m)
+            except Exception:
+                pass
+            m = items.GetNext()
+    except Exception as e:
+        print(f"    (lectura interrompuda: {str(e)[:70]})")
+    print(f"    llegits {len(out)} mails (limit {limite}"
+          + (f", ultims {dias} dies" if dias else "") + ")")
+    return out
 
 
 def remitente_smtp(msg):
@@ -377,27 +417,9 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
     pack_on = str(esc.get("pack_cliente", "si")).lower() not in ("no", "false", "off", "0")
     pack_regla = str(esc.get("pack_regla", "ultimo")).lower()
     # Congelar la llista abans de moure (moure mentre s'itera trenca l'index COM)
-    mails = [m for m in list(carpeta.Items) if getattr(m, "Class", 0) == 43]
-    # Ordre de la tanda: ha de coincidir amb el del redactor. Outlook torna els
-    # mails en ordre arbitrari (sovint els mes NOUS primer); sense ordenar aqui,
-    # amb topall de tanda nomes es repartien els recents i els vells no arribaven
-    # mai al calaix, per molt que el redactor despres ordenes be.
     orden = str(esc.get("orden_tanda", "antiguos")).lower()
-    try:
-        fechas = {}
-        sin_fecha = 0
-        for m in mails:
-            f = fecha_mail(m)
-            if f is None:
-                sin_fecha += 1
-            fechas[id(m)] = f or 0
-        mails.sort(key=lambda m: fechas[id(m)],
-                   reverse=(orden in ("recientes", "nuevos", "desc")))
-        if sin_fecha:
-            print(f"    ({sin_fecha} mails sense data llegible: van al final)")
-    except Exception as e:
-        print(f"    (AVIS: no s'ha pogut ordenar per data: {str(e)[:70]}"
-              " — s'usa l'ordre d'Outlook)")
+    dias = int(esc.get("dias_max", 0) or 0)
+    mails = mails_de_carpeta(carpeta, orden, max_mails, dias)
     print(f"    ordre de la tanda: dels mes "
           f"{'NOUS' if orden in ('recientes','nuevos','desc') else 'VELLS'} primer")
     analisis = []
