@@ -68,6 +68,11 @@ Reglas INQUEBRANTABLES:
 7. NO REPITAS lo ya dicho: si en el HISTORIAL PREVIO o en el hilo citado del propio mensaje ya se le pidio un documento (p.ej. el modelo 576) o ya se le dio una informacion, NO lo vuelvas a pedir ni a mencionar. Responde SOLO a lo nuevo del mensaje actual.
 8. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
 9. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
+11. NUNCA digas que adjuntas, envias o dejas adjunto un documento, un PDF, una propuesta de honorarios o un formulario. NO PUEDES adjuntar archivos. Si el cliente necesita un documento, di que se lo haremos llegar, nunca que va adjunto.
+12. NO PIDAS un dato que el cliente YA HA ESCRITO en su mensaje o en el hilo citado. Antes de pedir la matricula, el DNI, el telefono o el nombre, RELEELO: si esta, usalo. Pedir algo que acaba de dar es el peor error posible.
+13. RESPONDE PRIMERO A LO QUE PREGUNTA. Si pregunta por el estado, habla del estado; si pregunta si esta en plazo, contesta eso. Solo despues, y solo si hace falta, pide algo. Una respuesta que ignora la pregunta y pide un dato es una respuesta fallida.
+14. Si el cliente plantea una cuestion juridica (prescripcion, plazos legales, articulos de una ley, interpretacion de una norma) NO la resuelvas: confianza "baja" y di que un companyo del equipo se lo confirmara.
+15. Si el cliente expresa espera larga o malestar ("hace meses", "ha pasado muchisimo tiempo", "no tengo noticias"), reconocelo en UNA linea antes de nada. No lo ignores.
 10. FORMATO del correo (usa saltos de linea \n dentro del texto): saludo en su propia linea; linea en blanco; el cuerpo en 1-3 parrafos cortos separados por linea en blanco; linea en blanco; y el CIERRE ("Quedamos a la espera." o "Saludos cordiales,") como ultima linea.
 
 Devuelve EXCLUSIVAMENTE: {"respuesta":"<texto>","documento_salida":"D1|D2|NINGUNO","confianza":"alta|media|baja","motivo_confianza":"<una frase>"}"""
@@ -870,7 +875,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     orden = str(esc.get("orden_tanda", "antiguos")).lower()
     lista_items.sort(key=lambda m: componentes_fecha(m) or (0, 0, 0, 0, 0, 0),
                      reverse=(orden in ("recientes", "nuevos", "desc")))
-    print(f"    ordre de la tanda: {'dels mes NOUS' if orden in ('recientes','nuevos','desc') else 'dels mes VELLS'} cap avall")
+    print(f"    ordre de la tanda: es comenca pels mails mes "
+          f"{'NOUS' if orden in ('recientes','nuevos','desc') else 'VELLS'}")
 
     # AGRUPACIO PER CLIENT: si un client te diversos mails pendents, es respon
     # NOMES el mes recent (amb els anteriors com a context); la resta es marca.
@@ -1170,6 +1176,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 destino, motivo = "DESCARTE", "dominio_no_cliente"
             docs_off = str(esc.get("documentos_sin_borrador", "si")).lower() not in ("no", "false", "off", "0")
             sin_borrador = (destino in ("SISTEMA", "DESCARTE")) or (motivo == "adjunto_real")
+            # Client NO identificat: no te sentit redactar. L'unic que es pot dir
+            # es una frase generica demanant la matricula, que sovint el client
+            # JA ha escrit. Millor que ho vegi una persona.
+            if str(esc.get("borrador_sin_ficha", "no")).lower() in ("no", "false", "off", "0"):
+                if destino == "HUMANO" and motivo in ("sin_ficha_bbdd", "remitente_sin_historial"):
+                    sin_borrador = True
+                    print(f"    SENSE ESBORRANY: client no identificat ({motivo})"
+                          " — ho mira una persona")
             motivo_docs = ""
             if docs_off and not sin_borrador:
                 # Porta 1: parla d'arxius encara que no en porti cap

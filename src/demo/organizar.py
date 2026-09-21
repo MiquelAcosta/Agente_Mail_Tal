@@ -372,6 +372,15 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
     pack_regla = str(esc.get("pack_regla", "ultimo")).lower()
     # Congelar la llista abans de moure (moure mentre s'itera trenca l'index COM)
     mails = [m for m in list(carpeta.Items) if getattr(m, "Class", 0) == 43]
+    # Ordre de la tanda: ha de coincidir amb el del redactor. Outlook torna els
+    # mails en ordre arbitrari (sovint els mes NOUS primer); sense ordenar aqui,
+    # amb topall de tanda nomes es repartien els recents i els vells no arribaven
+    # mai al calaix, per molt que el redactor despres ordenes be.
+    orden = str(esc.get("orden_tanda", "antiguos")).lower()
+    mails.sort(key=lambda m: fecha_mail(m) or 0,
+               reverse=(orden in ("recientes", "nuevos", "desc")))
+    print(f"    ordre de la tanda: dels mes "
+          f"{'NOUS' if orden in ('recientes','nuevos','desc') else 'VELLS'} primer")
     analisis = []
     n = 0
     # ---- FASE A: analitzar-ho TOT sense moure res (cal la foto sencera de la
