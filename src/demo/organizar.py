@@ -269,7 +269,13 @@ def fecha_mail(msg):
     Mai s'ordena per text: str() d'una data d'Outlook pot sortir en format local
     (15/09/2026) i l'ordre alfabetic compara el dia abans que l'any."""
     for origen in ("ReceivedTime", "SentOn", "CreationTime"):
-        v = getattr(msg, origen, None)
+        try:
+            # getattr sobre un objecte COM pot LLANÇAR (mail corrupte, element
+            # no sincronitzat del servidor, permisos). No n'hi ha prou amb el
+            # default de getattr: cal el try.
+            v = getattr(msg, origen, None)
+        except Exception:
+            continue
         if v is None:
             continue
         try:
@@ -377,8 +383,21 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
     # amb topall de tanda nomes es repartien els recents i els vells no arribaven
     # mai al calaix, per molt que el redactor despres ordenes be.
     orden = str(esc.get("orden_tanda", "antiguos")).lower()
-    mails.sort(key=lambda m: fecha_mail(m) or 0,
-               reverse=(orden in ("recientes", "nuevos", "desc")))
+    try:
+        fechas = {}
+        sin_fecha = 0
+        for m in mails:
+            f = fecha_mail(m)
+            if f is None:
+                sin_fecha += 1
+            fechas[id(m)] = f or 0
+        mails.sort(key=lambda m: fechas[id(m)],
+                   reverse=(orden in ("recientes", "nuevos", "desc")))
+        if sin_fecha:
+            print(f"    ({sin_fecha} mails sense data llegible: van al final)")
+    except Exception as e:
+        print(f"    (AVIS: no s'ha pogut ordenar per data: {str(e)[:70]}"
+              " — s'usa l'ordre d'Outlook)")
     print(f"    ordre de la tanda: dels mes "
           f"{'NOUS' if orden in ('recientes','nuevos','desc') else 'VELLS'} primer")
     analisis = []
