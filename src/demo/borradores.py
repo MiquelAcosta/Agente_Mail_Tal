@@ -635,6 +635,38 @@ def mails_de_carpeta_items(items, orden="antiguos", limite=50, dias=0):
     return out
 
 
+RE_DNI = re.compile(r"\b\d{7,8}\s?[A-HJ-NP-TV-Z]\b", re.IGNORECASE)
+RE_TEL = re.compile(r"\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b")
+
+
+def datos_ya_facilitados(asunto, cuerpo):
+    """Dades que el client JA ha escrit al missatge actual.
+
+    Un model petit no segueix de manera fiable una regla que diu "no demanis el
+    que ja t'han donat", sobretot si al fil citat nosaltres li vam demanar. Aixi
+    que la dada s'extreu aqui, de manera determinista, i se li dona feta amb una
+    prohibicio explicita. Es mira NOMES el missatge actual, no el fil citat:
+    el que va escriure el client fa mesos no compta com a facilitat ara."""
+    txt = (asunto or "") + "\n" + (cuerpo or "")
+    # Tallar el fil citat: nomes interessa el que ha escrit ELL aquesta vegada
+    for marca in ("\nEl ", "\n-----Original", "\nFrom:", "\nDe:", "\n________"):
+        i = txt.find(marca)
+        if i > 40:
+            txt = txt[:i]
+            break
+    trobat = []
+    m = REGEX_MATRICULA.search(txt.upper())
+    if m:
+        trobat.append(("matricula", m.group(0).replace(" ", "").upper()))
+    m = RE_DNI.search(txt)
+    if m:
+        trobat.append(("DNI", m.group(0).upper()))
+    m = RE_TEL.search(txt)
+    if m:
+        trobat.append(("telefono", m.group(0)))
+    return trobat
+
+
 def remitente_smtp(msg):
     """Adreca SMTP REAL del remitent, o None.
 
@@ -1408,8 +1440,18 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print("    PLANTILLA FIXA -> copy-paste (sense redactor)")
                 else:
                   print("    REDACTOR -> escribiendo...")
+                  ya_dados = datos_ya_facilitados(asunto, cuerpo)
+                  ya_dados_txt = ""
+                  if ya_dados:
+                      detall = "; ".join(f"{k}: {v}" for k, v in ya_dados)
+                      ya_dados_txt = ("\nDATOS QUE EL CLIENTE YA HA FACILITADO EN ESTE MISMO MENSAJE: "
+                                      + detall +
+                                      ". PROHIBIDO pedirle estos datos: ya los tienes. Si el hilo"
+                                      " citado se los pedia, ES ANTIGUO y ya estan respondidos.\n")
+                      print(f"    el client ja ha donat: {detall} (no se li demanara)")
                   red = llamar(ia, PROMPT_REDACTOR,
                                f"DATOS VERIFICADOS: {datos}\nHISTORIAL PREVIO con este cliente:\n{hilo_txt}\nCATEGORIA: {categoria}\n{guia}"
+                               + ya_dados_txt +
                                f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                   respuesta = formatear_respuesta(respuesta)
