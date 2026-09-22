@@ -90,6 +90,7 @@ Reglas INQUEBRANTABLES:
 7. NO REPITAS lo ya dicho: si en el HISTORIAL PREVIO o en el hilo citado del propio mensaje ya se le pidio un documento (p.ej. el modelo 576) o ya se le dio una informacion, NO lo vuelvas a pedir ni a mencionar. Responde SOLO a lo nuevo del mensaje actual.
 8. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
 9. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
+17. El saludo va SIN NOMBRE: escribe exactamente "Buenos dias," y nunca "Buenos dias Leonor Cruz Gimenez,". No pongas el nombre ni los apellidos del cliente en ninguna parte del correo.
 16. Si la categoria es de DESISTIMIENTO o cancelacion: NUNCA termines con "Quedamos a la espera.". El cliente quiere cerrar, no se le espera nada. Cierra con "Saludos cordiales,".
 11. NUNCA digas que adjuntas, envias o dejas adjunto un documento, un PDF, una propuesta de honorarios o un formulario. NO PUEDES adjuntar archivos. Si el cliente necesita un documento, di que se lo haremos llegar, nunca que va adjunto.
 12. NO PIDAS un dato que el cliente YA HA ESCRITO en su mensaje o en el hilo citado. Antes de pedir la matricula, el DNI, el telefono o el nombre, RELEELO: si esta, usalo. Pedir algo que acaba de dar es el peor error posible.
@@ -400,7 +401,8 @@ def habla_de_documentos(asunto, cuerpo):
     return False, ""
 
 
-CARPETA_MULTIPLES = "MULTIPLES"   # nom configurable: "carpeta_multiples"
+CARPETA_MULTIPLES = "MULTIPLES"
+CALAIX_DIFICIL = "2 DIFICIL"   # on van els casos que demanen una persona   # nom configurable: "carpeta_multiples"
 
 # Bloc intern que es posa DINS de l'esborrany perque el treballador vegi el mail
 # previ sense anar-lo a buscar. VA DELIMITAT expressament: aixi es pot esborrar
@@ -498,6 +500,29 @@ def _buscar_o_crear(padre, nombre):
         if f.Name.lower() == nombre.lower():
             return f
     return padre.Folders.Add(nombre)
+
+
+def mover_a_calaix(msg, carpeta_origen, nombre):
+    """Mou un mail a un calaix GERMA del que s'esta processant (1 FACIL ->
+    2 DIFICIL, per exemple). Si ja hi es, no fa res. Torna True si s'ha mogut."""
+    try:
+        if str(getattr(carpeta_origen, "Name", "")).lower() == nombre.lower():
+            return False
+        padre = carpeta_origen.Parent
+        if padre is None:
+            return False
+        destino = _buscar_o_crear(padre, nombre)
+        movido = msg.Move(destino)
+        try:
+            donde = str(movido.Parent.Name)
+            if donde.lower() != nombre.lower():
+                print(f"    ATENCIO: ha acabat a '{donde}', no a '{nombre}'.")
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print(f"    (no s'ha pogut moure a {nombre}: {str(e)[:70]})")
+        return False
 
 
 def mover_a_multiples(msg, carpeta_origen, nombre=CARPETA_MULTIPLES):
@@ -839,6 +864,20 @@ def formatear_respuesta(texto, categoria=""):
         if es_desist:
             pide = None                      # en desistiment, sempre comiat net
         t = t.rstrip() + "\n\n" + ("Quedamos a la espera." if pide else "Saludos cordiales,")
+    # SALUTACIO SENSE NOM: "Buenos dias Leonor Cruz Gimenez," -> "Buenos dias,".
+    # El nom sencer amb cognoms queda fred i impersonal; el saludo net es mes
+    # natural i no pot equivocar-se de persona.
+    # "Estimado/Apreciado/Querido" necessiten un substantiu al darrere: sense nom
+    # queden coixos ("Estimado,"), aixi que es converteixen en "Buenos dias,".
+    t = _re.sub(r"^(Estimad[oa]s?|Apreciad[oa]s?|Querid[oa]s?)[ \t]+[^\n,:]{2,60}?[,:]",
+                "Buenos días,", t, count=1, flags=_re.IGNORECASE)
+    t = _re.sub(r"^(Estimad[oa]s?|Apreciad[oa]s?|Querid[oa]s?)[ \t]*[,:.]",
+                "Buenos días,", t, count=1, flags=_re.IGNORECASE)
+    t = _re.sub(r"^(Buenos d[ií]as|Buenas tardes|Buenas noches|Hola)[ \t]+[^\n,:.]{2,60}?([,:.])",
+                r"\1\2", t, count=1, flags=_re.IGNORECASE)
+    # restes del model: una linia solta amb "cordial," o "atentamente" enmig
+    t = _re.sub(r"\n[ \t]*(cordial(mente)?|atentamente|un cordial saludo)[,.]?[ \t]*(?=\n)",
+                "", t, flags=_re.IGNORECASE)
     # salutacio en linia propia: tallar despres de la PRIMERA frase (punt o dos punts)
     primera = t.split("\n", 1)[0]
     if _re.match(r"^(Buen|Estimad|Hola|Querid|Apreciad)", primera, _re.IGNORECASE):
@@ -1280,6 +1319,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                                   for d in esc.get("dominios_descartes", [])]
             if es_dominio_descartes(rem, dominios):
                 destino, motivo = "DESCARTE", "dominio_no_cliente"
+            mover_a_dificil = False
             docs_off = str(esc.get("documentos_sin_borrador", "si")).lower() not in ("no", "false", "off", "0")
             sin_borrador = (destino in ("SISTEMA", "DESCARTE")) or (motivo == "adjunto_real")
             # Client NO identificat: no te sentit redactar. L'unic que es pot dir
@@ -1288,6 +1328,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             if str(esc.get("borrador_sin_ficha", "no")).lower() in ("no", "false", "off", "0"):
                 if destino == "HUMANO" and motivo in ("sin_ficha_bbdd", "remitente_sin_historial"):
                     sin_borrador = True
+                    mover_a_dificil = True
                     print(f"    SENSE ESBORRANY: client no identificat ({motivo})"
                           " — ho mira una persona")
             motivo_docs = ""
@@ -1296,6 +1337,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 habla, det = habla_de_documentos(asunto, cuerpo)
                 if habla:
                     sin_borrador, motivo_docs = True, det
+            if mover_a_dificil and not dry and \
+               str(esc.get("sin_ficha_a_dificil", "si")).lower() not in ("no", "false", "off", "0"):
+                if mover_a_calaix(msg, carpeta, CALAIX_DIFICIL):
+                    print(f"    -> mogut a {CALAIX_DIFICIL} (cal una persona)")
             if sin_borrador and motivo_docs:
                 _apunta("parla d'arxius")
                 resultado = f"DOCUMENTOS ({motivo_docs}) — SENSE esborrany (ho mira una persona)"
