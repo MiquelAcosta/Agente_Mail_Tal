@@ -90,6 +90,7 @@ Reglas INQUEBRANTABLES:
 7. NO REPITAS lo ya dicho: si en el HISTORIAL PREVIO o en el hilo citado del propio mensaje ya se le pidio un documento (p.ej. el modelo 576) o ya se le dio una informacion, NO lo vuelvas a pedir ni a mencionar. Responde SOLO a lo nuevo del mensaje actual.
 8. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
 9. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
+16. Si la categoria es de DESISTIMIENTO o cancelacion: NUNCA termines con "Quedamos a la espera.". El cliente quiere cerrar, no se le espera nada. Cierra con "Saludos cordiales,".
 11. NUNCA digas que adjuntas, envias o dejas adjunto un documento, un PDF, una propuesta de honorarios o un formulario. NO PUEDES adjuntar archivos. Si el cliente necesita un documento, di que se lo haremos llegar, nunca que va adjunto.
 12. NO PIDAS un dato que el cliente YA HA ESCRITO en su mensaje o en el hilo citado. Antes de pedir la matricula, el DNI, el telefono o el nombre, RELEELO: si esta, usalo. Pedir algo que acaba de dar es el peor error posible.
 13. RESPONDE PRIMERO A LO QUE PREGUNTA. Si pregunta por el estado, habla del estado; si pregunta si esta en plazo, contesta eso. Solo despues, y solo si hace falta, pide algo. Una respuesta que ignora la pregunta y pide un dato es una respuesta fallida.
@@ -813,7 +814,7 @@ def log_init():
 import re as _re
 
 
-def formatear_respuesta(texto):
+def formatear_respuesta(texto, categoria=""):
     """Garanteix format de correu cordial encara que el model escrigui un bloc:
     salutacio en linia propia, paragrafs, i firma en dues linies."""
     t = (texto or "").strip()
@@ -825,10 +826,18 @@ def formatear_respuesta(texto):
     t = _re.sub(r"\s*Un saludo,?\s*(El equipo de atenci[oó]n\.?)?\s*$", "", t, flags=_re.IGNORECASE)
     t = _re.sub(r"\s*El equipo de atenci[oó]n\.?\s*$", "", t, flags=_re.IGNORECASE)
     t = _re.sub(r"\n\s*Un saludo,?\s*\n?", "\n", t, flags=_re.IGNORECASE)
+    # DESISTIMENT: mai "Quedamos a la espera.". El client vol tancar; quedar a
+    # l'espera sona a que se li demana alguna cosa mes o a que no s'accepta.
+    es_desist = "desist" in str(categoria).lower() or "cancelacion" in str(categoria).lower()
+    if es_desist:
+        t = _re.sub(r"\s*Quedamos a la espera\.?\s*$", "", t, flags=_re.IGNORECASE)
+        t = _re.sub(r"\n\s*Quedamos a la espera\.?\s*\n", "\n", t, flags=_re.IGNORECASE)
     # tancament garantit: peticio -> "Quedamos a la espera." | informatiu -> "Saludos cordiales,"
     if not _re.search(r"(quedamos a la espera|saludos cordiales)\s*[.,]?\s*$", t, _re.IGNORECASE):
         pide = _re.search(r"(env[ií]e|env[ií]enos|nos mande|m[aá]ndenos|facil[ií]t|adjunte|reenv[ií]e|"
                           r"necesitamos que|puede indicarnos|puede facilitarnos|\?)", t, _re.IGNORECASE)
+        if es_desist:
+            pide = None                      # en desistiment, sempre comiat net
         t = t.rstrip() + "\n\n" + ("Quedamos a la espera." if pide else "Saludos cordiales,")
     # salutacio en linia propia: tallar despres de la PRIMERA frase (punt o dos punts)
     primera = t.split("\n", 1)[0]
@@ -1454,7 +1463,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                + ya_dados_txt +
                                f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
-                  respuesta = formatear_respuesta(respuesta)
+                  respuesta = formatear_respuesta(respuesta, categoria)
                   print(f"    confianza: {confianza} | doc: {doc}")
                   if confianza == "baja":
                     avisos += " [CONFIANCA BAIXA del redactor]"
