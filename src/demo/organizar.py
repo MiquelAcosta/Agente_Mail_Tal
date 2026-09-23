@@ -170,8 +170,13 @@ class HistorialAbierto:
         return True
 
 
-def llamar(ia, system, user, timeout=240):
-    payload = json.dumps({"model": ia["modelo"], "temperature": 0, "max_tokens": 300,
+def llamar(ia, system, user, timeout=240, rapido=True):
+    """Crida al model. rapido=True (per defecte aqui) usa 'modelo_rapido' si esta
+    configurat: l'organitzador nomes CLASSIFICA, i classificar no necessita el
+    model gran. Amb l'API d'OpenAI aixo es la diferencia entre gastar centims i
+    gastar euros en aquest pas."""
+    modelo = ia.get("modelo_rapido") if (rapido and ia.get("modelo_rapido")) else ia["modelo"]
+    payload = json.dumps({"model": modelo, "temperature": 0, "max_tokens": 300,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}).encode("utf-8")
     req = urllib.request.Request(ia["base_url"].rstrip("/") + "/chat/completions", data=payload,
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {ia['api_key']}"})
