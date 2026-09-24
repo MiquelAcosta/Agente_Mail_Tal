@@ -773,6 +773,23 @@ def texto_del_arbol(categoria, ficha):
         return "", [], ""
     inten = ARBOL.get("categoria_a_intencion", {}).get(categoria or "")
     if not inten:
+        # No hi ha regla per a aquesta categoria. Si sabem l'estat del client,
+        # es fa servir el text de l'estat com a base (el model l'adapta a la
+        # pregunta). Nomes si no sabem res, ho mira una persona.
+        cod = (ficha or {}).get("estado_codigo")
+        if cod and ARBOL.get("fallback_estado"):
+            base = ARBOL.get("por_estado", {}).get(cod, "")
+            if base and base not in ("__HUMANO__", "__NO_RESPONDER__"):
+                if "{IMPORTE}" in base:
+                    imp = (ficha or {}).get("importe_perito")
+                    if not imp:
+                        return "", [], "humano"
+                    base = base.replace("{IMPORTE}", imp)
+                if "{DOC_FALTA}" in base:
+                    base = ARBOL.get("por_estado", {}).get("E3", "")
+                    if not base:
+                        return "", [], "humano"
+                return base, list(ARBOL.get("adjuntos_estado", {}).get(cod, [])), "adaptar"
         return "", [], ""
     adj = []
     # I1 (estat de la reclamacio) depen de l'ESTAT de l'expedient
@@ -793,7 +810,10 @@ def texto_del_arbol(categoria, ficha):
         falten = (ficha or {}).get("documentos_pendientes") or []
         dt = ARBOL.get("doc_textos", {})
         if not falten:
-            return "", [], "humano"       # diu que falta doc pero no sabem quin
+            # No sabem quin document falta: en lloc d'enviar-ho a una persona,
+            # es dona la resposta general de "expedient en revisio".
+            gen = ARBOL.get("por_estado", {}).get("E3", "")
+            return (gen, [], "texto") if gen else ("", [], "humano")
         txt = txt.replace("{DOC_FALTA}",
                           "\n".join("- " + dt.get(d.lower(), d) for d in falten))
         mapa = ARBOL.get("adjuntos_intencion", {}).get(inten, {})
@@ -1685,7 +1705,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                    "USALO COMO CONTENIDO: puedes adaptar el tono y enlazarlo con naturalidad, "
                                    "pero NO cambies los datos, NO quites informacion y NO anadas nada que no "
                                    "este aqui. No pongas saludo ni despedida: se anaden aparte.\n")
-                  if txt_arbol and str(esc.get("texto_literal", "si")).lower() \
+                  if txt_arbol and accion_arbol == "texto" and \
+                          str(esc.get("texto_literal", "si")).lower() \
                           not in ("no", "false", "off", "0"):
                       # COPY-PASTE: la situacio es clara i l'equip ja ha decidit el text.
                       # No es crida el redactor: s'envia EXACTAMENT el que diu l'arbre.
