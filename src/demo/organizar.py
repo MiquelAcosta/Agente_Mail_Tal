@@ -469,8 +469,14 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                         nom_a = str(a.FileName)
                     except Exception:
                         nom_a = "(sense nom)"
-                    adjuntos.append({"nombre": nom_a,
-                                     "is_inline": nom_a.lower().startswith("image00"),
+                    # Imatges incrustades (signatures, logos, captures del fil
+                    # citat) mai son un document del client, sigui quina sigui la
+                    # mida: image001.png, imagen003.jpg, oledata.mso, ~WRD0001.jpg...
+                    baix = nom_a.lower()
+                    inline = bool(re.match(r"^(image|imagen|~wrd|oledata|logo|firma|"
+                                           r"signature|banner|icon)\w*\.(png|jpe?g|gif|bmp|"
+                                           r"emf|wmf|mso|tiff?)$", baix)) or baix.endswith(".mso")
+                    adjuntos.append({"nombre": nom_a, "is_inline": inline,
                                      "bytes": getattr(a, "Size", 0)})
             except Exception as e:
                 print(f"    (no s'han pogut llegir els adjunts: {str(e)[:60]})")

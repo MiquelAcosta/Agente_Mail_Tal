@@ -667,6 +667,24 @@ RE_DNI = re.compile(r"\b\d{7,8}\s?[A-HJ-NP-TV-Z]\b", re.IGNORECASE)
 RE_TEL = re.compile(r"\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b")
 
 
+def cuerpo_nuevo(cuerpo, minimo=15):
+    """Nomes el que ha escrit el client AQUESTA vegada, sense el fil citat.
+
+    Si no es talla, un "muchas gracias" de dues linies es classifica pel
+    contingut del correu anterior que queda citat a sota, i acaba al calaix
+    equivocat. El que mana es l'ultim missatge."""
+    t = str(cuerpo or "")
+    marques = ("\nEl ", "\n-----Original", "\nFrom:", "\nDe:", "\n________",
+               "\n> ", "\nEnviado desde", "\nObtener Outlook", "\nSent:", "\nEnviado el:")
+    tall = len(t)
+    for m in marques:
+        i = t.find(m)
+        if 0 <= i < tall:
+            tall = i
+    nou_t = t[:tall].strip()
+    return nou_t if len(nou_t) >= minimo else t.strip()
+
+
 def datos_ya_facilitados(asunto, cuerpo):
     """Dades que el client JA ha escrit al missatge actual.
 
@@ -1518,10 +1536,18 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                           " BBDD (total_perito buit) — ho mira una persona")
             except Exception:
                 pass
+            movido_a_otro = False
             if mover_a_dificil and not dry and \
                str(esc.get("sin_ficha_a_dificil", "si")).lower() not in ("no", "false", "off", "0"):
                 if mover_a_calaix(msg, carpeta, CALAIX_DIFICIL):
-                    print(f"    -> mogut a {CALAIX_DIFICIL} (cal una persona)")
+                    movido_a_otro = True
+                    print(f"    -> mogut a {CALAIX_DIFICIL} (SENSE marcar:"
+                          " es podra tractar alla)")
+            if movido_a_otro:
+                # Ja s'ha mogut a un altre calaix: NO es marca ni s'apunta al
+                # registre, perque alla el sistema l'ha de poder tractar.
+                print("    (no es marca ni s'apunta: es tractara al calaix nou)")
+                continue
             if sin_borrador and motivo_docs:
                 _apunta("parla d'arxius")
                 resultado = f"DOCUMENTOS ({motivo_docs}) — SENSE esborrany (ho mira una persona)"
@@ -1540,7 +1566,18 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if "(sin historial" not in hilo_txt:
                     print(f"    historial del buzon: {hilo_txt.count(chr(10)) + 1} missatges previs trobats")
                 # Classificar sempre (amb o sense fitxa): la categoria tria la plantilla
-                c = llamar(ia, PROMPT_CLASIFICADOR, f"HISTORIAL PREVIO con este cliente:\n{hilo_txt}\n\nMENSAJE ACTUAL:\nAsunto: {asunto}\nCuerpo: {cuerpo}", rapido=True)
+                # El cos SENCER hi es (fa falta per al context), pero separat:
+                # el que decideix la categoria es el que ha escrit ARA el client,
+                # no el correu nostre que queda citat a sota.
+                cuerpo_ult = cuerpo_nuevo(cuerpo)
+                resto = str(cuerpo or "")[len(cuerpo_ult):].strip()
+                bloque = "LO QUE ACABA DE ESCRIBIR EL CLIENTE (esto es lo que hay que responder):\n" + cuerpo_ult
+                if resto:
+                    bloque += ("\n\nCONTEXTO — mensajes anteriores del hilo (solo para entender"
+                               " el caso; NO clasifiques por esto):\n" + resto[:2500])
+                    print(f"    (pesa l'ultim missatge: {len(cuerpo_ult)} car. nous"
+                          f" + {len(resto)} de context)")
+                c = llamar(ia, PROMPT_CLASIFICADOR, f"HISTORIAL PREVIO con este cliente:\n{hilo_txt}\n\nMENSAJE ACTUAL:\nAsunto: {asunto}\n{bloque}", rapido=True)
                 categoria = c.get("categoria", "ambiguo")
                 t_low = (asunto + " " + cuerpo).lower()
                 if categoria.startswith("cancelacion"):
@@ -1699,15 +1736,22 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                       print("    ARBRE: aquest cas no s'automatitza — ho mira una persona")
                       resultado = "ARBOL -> HUMANO (sin borrador)"
                       print(f"    RESULTADO -> {resultado}")
+                      _cal = calaix_para_humano(categoria)
+                      _mogut = False
                       if not dry:
-                          marcar_agente(msg, marcar_leido=True)
-                          _cal = calaix_para_humano(categoria)
-                          if mover_a_calaix(msg, carpeta, _cal):
-                              print(f"    -> mogut a {_cal}")
-                      con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
-                                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                                  (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
-                                   categoria, flags, "", "", "", resultado, ""))
+                          _mogut = mover_a_calaix(msg, carpeta, _cal)
+                          if _mogut:
+                              print(f"    -> mogut a {_cal} (SENSE marcar: es podra"
+                                    " tractar alla)")
+                          else:
+                              marcar_agente(msg, marcar_leido=True)
+                      # Si s'ha mogut, NO es marca ni s'apunta al registre: si no,
+                      # al nou calaix el sistema el saltaria per "ja tractat".
+                      if not _mogut:
+                          con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                      " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                      (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                       categoria, flags, "", "", "", resultado, ""))
                       con.commit(); continue
                   if accion_arbol == "no_responder":
                       print("    ARBRE: no s'ha de respondre — es marca com a llegit")
@@ -1794,7 +1838,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                   red = llamar(ia, PROMPT_REDACTOR,
                                f"DATOS VERIFICADOS: {datos}\nHISTORIAL PREVIO con este cliente:\n{hilo_txt}\nCATEGORIA: {categoria}\n{guia}"
                                + arbol_txt + ya_dados_txt +
-                               f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
+                               f"MENSAJE del cliente:\nAsunto: {asunto}\n"
+                               f"LO QUE ACABA DE ESCRIBIR (responde A ESTO):\n{cuerpo_nuevo(cuerpo)}\n"
+                               f"CONTEXTO del hilo (solo para entender el caso):\n{str(cuerpo or '')[:3000]}")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                   respuesta = formatear_respuesta(respuesta, categoria)
                   print(f"    confianza: {confianza} | doc: {doc}")
