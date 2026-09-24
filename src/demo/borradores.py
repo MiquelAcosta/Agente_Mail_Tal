@@ -1526,7 +1526,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             # la resposta que toca (plantilla E2) no es pot omplir. Abans d'inventar
             # una xifra o deixar un buit, ho mira una persona.
             try:
-                _f = mail.get("ficha") or {}
+                _f = ficha or {}
                 if _f and _f.get("estado", "").startswith("informe pericial completado") \
                    and not _f.get("importe_perito"):
                     sin_borrador = True
@@ -1712,7 +1712,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print("    PLANTILLA FIXA -> copy-paste (sense redactor)")
                 else:
                   print("    REDACTOR -> escribiendo...")
-                  txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, mail.get("ficha"))
+                  txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, ficha)
                   if accion_arbol == "" and str(esc.get("solo_arbol", "no")).lower() \
                           not in ("no", "false", "off", "0"):
                       # No hi ha regla a l'arbre per a aquest cas. Abans que el model
