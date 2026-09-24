@@ -513,7 +513,10 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
             calaix = calaix_de(destino, categoria, flags, motivo)
             docs_on = str(esc.get("documentos_a_escalados", "si")).lower() not in ("no", "false", "off", "0")
             if docs_on and motivo != "adjunto_real":
-                habla, det_doc = habla_de_documentos(asunto, cuerpo)
+                # NOMES senyal fort ("os adjunto", "anexo"). El combo verb+nom
+                # ("ya os envie la documentacion") apareix a moltissimes preguntes
+                # d'estat i enviava a ESCALADOS correus que son FACIL.
+                habla, det_doc = habla_de_documentos(asunto, cuerpo, solo_fuerte=True)
                 if habla:
                     calaix = "ESCALADOS"
                     print(f"      PARLA DE DOCUMENTS ({det_doc}) -> {CARPETAS[calaix]}")

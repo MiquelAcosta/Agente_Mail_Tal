@@ -384,7 +384,7 @@ RE_DOC_NOMBRE = re.compile(
     r"contrato\s+de\s+compra|modelo\s*576|escritura\w*)\b", re.IGNORECASE)
 
 
-def habla_de_documentos(asunto, cuerpo):
+def habla_de_documentos(asunto, cuerpo, solo_fuerte=False):
     """(bool, motiu) — el mail gira al voltant d'arxius encara que no en porti.
 
     Cal un senyal FORT ("os adjunto") o bé un verb d'enviar JUNT amb un nom de
@@ -394,6 +394,8 @@ def habla_de_documentos(asunto, cuerpo):
     m = RE_DOC_FUERTE.search(t)
     if m:
         return True, "menciona: " + m.group(0)[:30]
+    if solo_fuerte:
+        return False, ""
     v = RE_DOC_VERBO.search(t)
     n = RE_DOC_NOMBRE.search(t)
     if v and n:
@@ -1497,7 +1499,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             motivo_docs = ""
             if docs_off and not sin_borrador:
                 # Porta 1: parla d'arxius encara que no en porti cap
-                habla, det = habla_de_documentos(asunto, cuerpo)
+                # Nomes senyal fort: el combo verb+nom bloquejava preguntes
+                # d'estat normals ("ya os envie la documentacion, como va?").
+                habla, det = habla_de_documentos(asunto, cuerpo, solo_fuerte=True)
                 if habla:
                     sin_borrador, motivo_docs = True, det
             # Si la fitxa diu que l'informe pericial esta fet pero NO tenim l'import,
