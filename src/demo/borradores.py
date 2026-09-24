@@ -804,11 +804,15 @@ def texto_del_arbol(categoria, ficha):
     # I1 (estat de la reclamacio) depen de l'ESTAT de l'expedient
     if inten == "I1":
         cod = (ficha or {}).get("estado_codigo") or "E7"
+        print(f"    ARBRE: intencio {inten} | estat {cod}"
+              + (" | import: " + str((ficha or {}).get("importe_perito"))
+                 if cod == "E2" else ""))
         txt = ARBOL.get("por_estado", {}).get(cod, "")
         adj = list(ARBOL.get("adjuntos_estado", {}).get(cod, []))
     else:
         txt = ARBOL.get("por_intencion", {}).get(inten, "")
     if txt == "__HUMANO__":
+        print(f"    ARBRE: aquest estat/intencio esta marcat com a HUMA a respuestas.json")
         return "", [], "humano"
     if txt == "__NO_RESPONDER__":
         return "", [], "no_responder"
@@ -1672,8 +1676,21 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                           not in ("no", "false", "off", "0"):
                       # No hi ha regla a l'arbre per a aquest cas. Abans que el model
                       # s'inventi una resposta, ho mira una persona.
-                      print(f"    ARBRE: cap regla per a '{categoria}' — ho mira una persona")
-                      accion_arbol = "humano"
+                      print(f"    ARBRE: cap regla per a '{categoria}' — sense esborrany")
+                      accion_arbol = "sin_regla"
+                  if accion_arbol == "sin_regla":
+                      # No hi ha regla: NO es redacta res, pero el correu es queda
+                      # AL SEU CALAIX. Moure'l a DIFICIL nomes perque encara no
+                      # tenim la regla escrita desordena la safata sense motiu.
+                      resultado = f"ARBOL -> sin regla para '{categoria}' (sin borrador)"
+                      print(f"    RESULTADO -> {resultado}")
+                      if not dry:
+                          marcar_agente(msg, marcar_leido=True)
+                      con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                  (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                   categoria, flags, "", "", "", resultado, ""))
+                      con.commit(); continue
                   if accion_arbol == "humano":
                       print("    ARBRE: aquest cas no s'automatitza — ho mira una persona")
                       resultado = "ARBOL -> HUMANO (sin borrador)"
