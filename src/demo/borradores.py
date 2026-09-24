@@ -1485,7 +1485,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 destino, motivo = "DESCARTE", "dominio_no_cliente"
             mover_a_dificil = False
             sin_importe = False
-            docs_off = str(esc.get("documentos_sin_borrador", "si")).lower() not in ("no", "false", "off", "0")
+            docs_off = str(esc.get("documentos_sin_borrador", "no")).lower() not in ("no", "false", "off", "0")
             sin_borrador = (destino in ("SISTEMA", "DESCARTE")) or (motivo == "adjunto_real")
             # Client NO identificat: no te sentit redactar. L'unic que es pot dir
             # es una frase generica demanant la matricula, que sovint el client
@@ -1569,7 +1569,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     continue
                 cats_doc = CATEGORIAS_DOCUMENTOS | {c_.strip().lower() for c_ in
                                                     esc.get("categorias_documentos", [])}
-                if docs_off and categoria in cats_doc:
+                if False and docs_off and categoria in cats_doc:
                     # Porta 2: el classificador diu que el tema SON els documents.
                     resultado = f"DOCUMENTOS (categoria {categoria}) — SENSE esborrany (ho mira una persona)"
                     _apunta(f"categoria de documents ({categoria})")
@@ -1676,7 +1676,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                   print("    REDACTOR -> escribiendo...")
                   txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, mail.get("ficha"))
-                  if accion_arbol == "" and str(esc.get("solo_arbol", "si")).lower() \
+                  if accion_arbol == "" and str(esc.get("solo_arbol", "no")).lower() \
                           not in ("no", "false", "off", "0"):
                       # No hi ha regla a l'arbre per a aquest cas. Abans que el model
                       # s'inventi una resposta, ho mira una persona.

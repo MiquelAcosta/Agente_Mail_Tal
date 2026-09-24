@@ -511,7 +511,10 @@ def procesar(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
                     flags = ", ".join(k for k in ("sospecha_sucesion", "cancelacion",
                                                   "complejo", "repregunta_insatisfecha") if c.get(k))
             calaix = calaix_de(destino, categoria, flags, motivo)
-            docs_on = str(esc.get("documentos_a_escalados", "si")).lower() not in ("no", "false", "off", "0")
+            # Per defecte APAGAT: a 4 ESCALADOS nomes hi van els mails amb
+            # arxiu adjunt de veritat (motivo == "adjunto_real"). Mencionar un
+            # document al text NO es motiu per escalar res.
+            docs_on = str(esc.get("documentos_a_escalados", "no")).lower() not in ("no", "false", "off", "0")
             if docs_on and motivo != "adjunto_real":
                 # NOMES senyal fort ("os adjunto", "anexo"). El combo verb+nom
                 # ("ya os envie la documentacion") apareix a moltissimes preguntes
