@@ -27,35 +27,93 @@ CAMPOS = """matricula, marca, modelo, nombre, apellido1, apellido2, empresa,
 tipo_titular, estado_vehiculo_ayp, estado_propietario_ayp, procedimiento,
 apto, coche_cerrado, estado_perito, factura, contrato_compra, modelo_576, solicitud_mod_576,
 denegacion_modelo_576, herencia, poderes_pleitos, ha_vendido_coche,
-envio_fyg, estado_fyg, envio_minsait, estado_minsait"""
+envio_fyg, estado_fyg, envio_minsait, estado_minsait,
+total_perito, Diligencias_Preliminares, Solicitando_576, Denegado_576,
+fecha_aviso_ya_esta"""
+
+
+def _importe_perito(valor):
+    """Import de la indemnitzacio en format espanyol (1.886,81 €), o None.
+
+    Retorna None si el camp es buit o no es un numero: en aquest cas la resposta
+    NO es pot automatitzar i el correu ha d'anar a una persona. Mai s'envia una
+    plantilla amb el buit sense omplir."""
+    if valor is None:
+        return None
+    t = str(valor).strip().replace("€", "").replace(" ", "")
+    if not t:
+        return None
+    t = t.replace(".", "").replace(",", ".") if ("," in t and "." in t) else t.replace(",", ".")
+    try:
+        n = float(t)
+    except Exception:
+        return None
+    if n <= 0:
+        return None
+    ent, dec = f"{n:,.2f}".split(".")
+    return ent.replace(",", ".") + "," + dec + " €"
+
+
+def _si(v):
+    """True si el camp marca afirmatiu (Si/Sí/S/1/X/True...)."""
+    t = str(v or "").strip().lower()
+    return t in ("si", "sí", "s", "1", "x", "true", "yes", "ok")
 
 
 def _componer_estado(d):
-    """Compon l'estat de cara al client a partir del cicle de vida real.
-    Retorna (frase_apta_per_a_client, detall_intern)."""
+    """Estat de l'expedient segons l'arbre de respostes de l'equip.
+
+    Retorna (codi, frase_per_al_client, detall_intern). El CODI es el que fa
+    servir l'arbre per triar la plantilla; la frase es per al redactor.
+
+      E1  Completo SIN informe pericial
+      E2  Completo CON informe pericial
+      E3  Incompleto, NO diligencies preliminars
+      E3.1 Pendent de documentacio (se sap quina falta)
+      E4  Diligencies preliminars, model 576 SOL.LICITAT
+      E5  Diligencies preliminars, model 576 NO sol.licitat
+      E6  Vehicle no elegible / no apte
+      E7  (el codi no el pot donar: client no identificat)
+    """
     interno = " | ".join(f"{k}={d[k]}" for k in
-                         ("estado_vehiculo_ayp", "apto", "envio_fyg", "estado_fyg",
-                          "estado_minsait", "procedimiento", "coche_cerrado", "estado_perito") if d.get(k))
-    ev = d["estado_vehiculo_ayp"].upper()
-    if d["coche_cerrado"]:
-        # 'cerrado' = revisio completada (NO expedient acabat), segons plantilles de l'equip
-        if d.get("estado_perito"):
-            return "informe pericial completado, pendiente de interposición de la demanda", interno
-        return "completo y revisado, en espera del informe pericial", interno
-    if d["procedimiento"]:
-        return "en fase de procedimiento judicial", interno
-    if d["envio_fyg"] or d["estado_fyg"]:
-        return "documentación revisada y expediente remitido para su tramitación en la demanda", interno
+                         ("estado_vehiculo_ayp", "apto", "coche_cerrado", "estado_perito",
+                          "Diligencias_Preliminares", "Solicitando_576", "Denegado_576",
+                          "envio_fyg", "estado_fyg", "estado_minsait", "procedimiento")
+                         if d.get(k))
+    ev = str(d.get("estado_vehiculo_ayp") or "").upper()
+
+    # --- No elegible: mana sobre tota la resta -----------------------------
+    if ev.startswith("OUT_") or ev in ("NO AFECTADO", "CAMION", "ADQUIRIDO FUERA DE ESPAÑA") \
+       or str(d.get("apto") or "").strip().lower() == "no":
+        return "E6", "vehículo no elegible según la revisión", interno
+
+    # --- Expedient tancat (revisio completa) -------------------------------
+    if _si(d.get("coche_cerrado")):
+        if str(d.get("estado_perito") or "").strip():
+            return "E2", ("completo, con informe pericial recibido, "
+                          "pendiente de interposición de la demanda"), interno
+        return "E1", "completo y revisado, en espera del informe pericial", interno
+
+    # --- Diligencies preliminars -------------------------------------------
+    if _si(d.get("Diligencias_Preliminares")):
+        if _si(d.get("Solicitando_576")) or str(d.get("solicitud_mod_576") or "").strip():
+            return "E4", ("en diligencias preliminares, con el modelo 576 solicitado"), interno
+        return "E5", "en diligencias preliminares, sin el modelo 576 solicitado", interno
+
+    # --- Falta documentacio concreta ---------------------------------------
     if ev.startswith("PEDIDO_"):
         que = ev.replace("PEDIDO_", "").replace("_", " ").strip().lower()
-        return f"pendiente de documentación: {que}", interno
-    if ev.startswith("OUT_") or ev in ("NO AFECTADO", "CAMION", "ADQUIRIDO FUERA DE ESPAÑA"):
-        return "vehículo no elegible según la revisión (derivar a persona para explicación)", interno
-    if d["apto"] == "No":
-        return "revisado como no apto (derivar a persona para explicación)", interno
-    if ev == "OK" or d["apto"] == "Si":
-        return "documentación en revisión, expediente en preparación", interno
-    return "sin información de estado", interno
+        return "E3.1", f"pendiente de documentación: {que}", interno
+    faltan = [n for n, k in (("factura", "factura"),
+                             ("contrato de compra", "contrato_compra"),
+                             ("modelo 576", "modelo_576"),
+                             ("poderes", "poderes_pleitos"))
+              if not str(d.get(k) or "").strip()]
+    if faltan and not (d.get("envio_fyg") or d.get("estado_fyg")):
+        return "E3.1", "pendiente de documentación: " + ", ".join(faltan), interno
+
+    # --- Incomplet, sense diligencies --------------------------------------
+    return "E3", "documentación en revisión, expediente en preparación", interno
 
 
 def _traducir(fila):
@@ -64,13 +122,19 @@ def _traducir(fila):
     titular = " ".join(x for x in (d["nombre"], d["apellido1"], d["apellido2"]) if x)
     if not titular and d["empresa"]:
         titular = d["empresa"] + " (empresa)"
-    estado, detalle = _componer_estado(d)
+    codi, estado, detalle = _componer_estado(d)
     return {
         "matricula": d["matricula"] or "(sin matrícula)",
         "titular": titular or "(sin nombre)",
         "tipo_titular": d["tipo_titular"],
+        "estado_codigo": codi,
         "estado": estado,
         "detalle_interno": detalle,
+        "importe_perito": _importe_perito(d.get("total_perito")),
+        "diligencias_preliminares": _texto(d.get("Diligencias_Preliminares")),
+        "solicitando_576": _texto(d.get("Solicitando_576")),
+        "denegado_576": _texto(d.get("Denegado_576")),
+        "avisado_ya_esta": bool(_texto(d.get("fecha_aviso_ya_esta"))),
         "documentacion": {
             "factura": _hay_doc(d["factura"]),
             "contrato_compra": _hay_doc(d["contrato_compra"]),

@@ -857,6 +857,14 @@ def formatear_respuesta(texto, categoria=""):
     if es_desist:
         t = _re.sub(r"\s*Quedamos a la espera\.?\s*$", "", t, flags=_re.IGNORECASE)
         t = _re.sub(r"\n\s*Quedamos a la espera\.?\s*\n", "\n", t, flags=_re.IGNORECASE)
+    # MAI els dos tancaments alhora: si hi ha "Saludos cordiales" al final,
+    # qualsevol "Quedamos a la espera" anterior sobra (i a l'inreves).
+    if _re.search(r"saludos cordiales\s*[.,]?\s*$", t, _re.IGNORECASE):
+        t = _re.sub(r"\n[ \t]*Quedamos a la espera\.?[ \t]*(?=\n)", "", t, flags=_re.IGNORECASE)
+        t = _re.sub(r"\n[ \t]*Quedamos a su disposici[oó]n[^\n]*(?=\n)", "", t, flags=_re.IGNORECASE)
+    # frases buides de farciment que l'equip no vol
+    t = _re.sub(r"[^.\n]*\bagradecemos su paciencia\b[^.\n]*\.\s*", "", t, flags=_re.IGNORECASE)
+    t = _re.sub(r"\n{3,}", "\n\n", t)
     # tancament garantit: peticio -> "Quedamos a la espera." | informatiu -> "Saludos cordiales,"
     if not _re.search(r"(quedamos a la espera|saludos cordiales)\s*[.,]?\s*$", t, _re.IGNORECASE):
         pide = _re.search(r"(env[ií]e|env[ií]enos|nos mande|m[aá]ndenos|facil[ií]t|adjunte|reenv[ií]e|"
@@ -1320,6 +1328,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             if es_dominio_descartes(rem, dominios):
                 destino, motivo = "DESCARTE", "dominio_no_cliente"
             mover_a_dificil = False
+            sin_importe = False
             docs_off = str(esc.get("documentos_sin_borrador", "si")).lower() not in ("no", "false", "off", "0")
             sin_borrador = (destino in ("SISTEMA", "DESCARTE")) or (motivo == "adjunto_real")
             # Client NO identificat: no te sentit redactar. L'unic que es pot dir
@@ -1337,6 +1346,20 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 habla, det = habla_de_documentos(asunto, cuerpo)
                 if habla:
                     sin_borrador, motivo_docs = True, det
+            # Si la fitxa diu que l'informe pericial esta fet pero NO tenim l'import,
+            # la resposta que toca (plantilla E2) no es pot omplir. Abans d'inventar
+            # una xifra o deixar un buit, ho mira una persona.
+            try:
+                _f = mail.get("ficha") or {}
+                if _f and _f.get("estado", "").startswith("informe pericial completado") \
+                   and not _f.get("importe_perito"):
+                    sin_borrador = True
+                    mover_a_dificil = True
+                    sin_importe = True
+                    print("    SENSE ESBORRANY: informe pericial fet pero SENSE import a la"
+                          " BBDD (total_perito buit) — ho mira una persona")
+            except Exception:
+                pass
             if mover_a_dificil and not dry and \
                str(esc.get("sin_ficha_a_dificil", "si")).lower() not in ("no", "false", "off", "0"):
                 if mover_a_calaix(msg, carpeta, CALAIX_DIFICIL):
