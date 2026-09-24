@@ -693,6 +693,42 @@ def datos_ya_facilitados(asunto, cuerpo):
     return trobat
 
 
+CARPETA_ADJUNTOS = os.path.join(AQUI, "adjuntos")
+
+
+def ruta_adjunto(nombre):
+    """Ruta completa d'un document a adjuntar, o None si no hi es."""
+    if not nombre:
+        return None
+    p = os.path.join(CARPETA_ADJUNTOS, str(nombre).strip())
+    return p if os.path.isfile(p) else None
+
+
+def comprobar_adjuntos(nombres):
+    """(llista_de_rutes, llista_de_noms_que_FALTEN).
+
+    Si en falta algun, el correu NO s'ha de redactar: hi hauria un text dient
+    'le adjuntamos...' sense el document. Val mes que ho miri una persona."""
+    rutas, falten = [], []
+    for n in nombres or []:
+        r = ruta_adjunto(n)
+        (rutas if r else falten).append(r or n)
+    return rutas, falten
+
+
+def adjuntar(reply, rutas):
+    """Enganxa els documents a l'esborrany. Torna quants n'ha pogut posar."""
+    posats = 0
+    for r in rutas or []:
+        try:
+            reply.Attachments.Add(r)
+            posats += 1
+            print(f"    adjuntat: {os.path.basename(r)}")
+        except Exception as e:
+            print(f"    (no s'ha pogut adjuntar {os.path.basename(r)}: {str(e)[:60]})")
+    return posats
+
+
 def remitente_smtp(msg):
     """Adreca SMTP REAL del remitent, o None.
 
