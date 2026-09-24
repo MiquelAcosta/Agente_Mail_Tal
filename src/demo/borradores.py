@@ -825,9 +825,13 @@ def texto_del_arbol(categoria, ficha):
             return (gen, [], "texto") if gen else ("", [], "humano")
         txt = txt.replace("{DOC_FALTA}",
                           "\n".join("- " + dt.get(d.lower(), d) for d in falten))
-        mapa = ARBOL.get("adjuntos_intencion", {}).get(inten, {})
+        # El PDF que toca segons el document que falta. Es mira el mapa GLOBAL,
+        # aixi funciona vingui el cas per la intencio o per l'estat: abans nomes
+        # s'adjuntava si entrava per I4, i el 576 es mencionava sense adjuntar-lo.
+        mapa = dict(ARBOL.get("adjuntos_documento", {}))
+        mapa.update(ARBOL.get("adjuntos_intencion", {}).get(inten, {}))
         for d in falten:
-            a = mapa.get(d.lower())
+            a = mapa.get(str(d).strip().lower())
             if a and a not in adj:
                 adj.append(a)
     # {IMPORTE}: si no el tenim, no s'automatitza
