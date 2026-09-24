@@ -729,6 +729,87 @@ def adjuntar(reply, rutas):
     return posats
 
 
+RUTA_RESPUESTAS = os.path.join(AQUI, "respuestas.json")
+RUTA_AFECTACIONES = os.path.join(AQUI, "afectaciones.csv")
+ARBOL = {}
+AFECTACIONES = {}
+
+
+def cargar_arbol():
+    """Carrega l'arbre de respostes i la taula d'afectacions."""
+    global ARBOL, AFECTACIONES
+    try:
+        with open(RUTA_RESPUESTAS, encoding="utf-8") as fh:
+            ARBOL = json.load(fh)
+        print(f"    arbre de respostes: {len(ARBOL.get('por_estado', {}))} estats,"
+              f" {len(ARBOL.get('por_intencion', {}))} intencions")
+    except Exception as e:
+        print(f"    (AVIS: respuestas.json no carregat: {str(e)[:70]})")
+    try:
+        import csv as _csv
+        with open(RUTA_AFECTACIONES, encoding="utf-8") as fh:
+            for r in _csv.DictReader(fh):
+                AFECTACIONES[r["marca"].strip().upper()] = (r["inicio"], r["fin"])
+        print(f"    taula d'afectacions: {len(AFECTACIONES)} marques")
+    except Exception as e:
+        print(f"    (AVIS: afectaciones.csv no carregat: {str(e)[:70]})")
+
+
+def esta_afectado(marca, fecha_compra):
+    """True/False/None (None = marca desconeguda o data desconeguda)."""
+    m = (marca or "").strip().upper()
+    if m not in AFECTACIONES or not fecha_compra:
+        return None
+    ini, fin = AFECTACIONES[m]
+    return ini <= str(fecha_compra)[:10] <= fin
+
+
+def texto_del_arbol(categoria, ficha):
+    """Text OBLIGATORI segons l'arbre: (texto, adjuntos, accion).
+
+    accion: "texto" (hi ha text), "humano" (no automatitzar),
+            "no_responder" (marcar llegit i prou), "" (no hi ha regla)."""
+    if not ARBOL:
+        return "", [], ""
+    inten = ARBOL.get("categoria_a_intencion", {}).get(categoria or "")
+    if not inten:
+        return "", [], ""
+    adj = []
+    # I1 (estat de la reclamacio) depen de l'ESTAT de l'expedient
+    if inten == "I1":
+        cod = (ficha or {}).get("estado_codigo") or "E7"
+        txt = ARBOL.get("por_estado", {}).get(cod, "")
+        adj = list(ARBOL.get("adjuntos_estado", {}).get(cod, []))
+    else:
+        txt = ARBOL.get("por_intencion", {}).get(inten, "")
+    if txt == "__HUMANO__":
+        return "", [], "humano"
+    if txt == "__NO_RESPONDER__":
+        return "", [], "no_responder"
+    if not txt:
+        return "", [], ""
+    # {DOC_FALTA}: llista de documents pendents segons la fitxa
+    if "{DOC_FALTA}" in txt:
+        falten = (ficha or {}).get("documentos_pendientes") or []
+        dt = ARBOL.get("doc_textos", {})
+        if not falten:
+            return "", [], "humano"       # diu que falta doc pero no sabem quin
+        txt = txt.replace("{DOC_FALTA}",
+                          "\n".join("- " + dt.get(d.lower(), d) for d in falten))
+        mapa = ARBOL.get("adjuntos_intencion", {}).get(inten, {})
+        for d in falten:
+            a = mapa.get(d.lower())
+            if a and a not in adj:
+                adj.append(a)
+    # {IMPORTE}: si no el tenim, no s'automatitza
+    if "{IMPORTE}" in txt:
+        imp = (ficha or {}).get("importe_perito")
+        if not imp:
+            return "", [], "humano"
+        txt = txt.replace("{IMPORTE}", imp)
+    return txt, adj, "texto"
+
+
 def remitente_smtp(msg):
     """Adreca SMTP REAL del remitent, o None.
 
@@ -1553,6 +1634,51 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print("    PLANTILLA FIXA -> copy-paste (sense redactor)")
                 else:
                   print("    REDACTOR -> escribiendo...")
+                  txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, mail.get("ficha"))
+                  if accion_arbol == "humano":
+                      print("    ARBRE: aquest cas no s'automatitza — ho mira una persona")
+                      resultado = "ARBOL -> HUMANO (sin borrador)"
+                      print(f"    RESULTADO -> {resultado}")
+                      if not dry:
+                          marcar_agente(msg, marcar_leido=True)
+                          mover_a_calaix(msg, carpeta, CALAIX_DIFICIL)
+                      con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                  (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                   categoria, flags, "", "", "", resultado, ""))
+                      con.commit(); continue
+                  if accion_arbol == "no_responder":
+                      print("    ARBRE: no s'ha de respondre — es marca com a llegit")
+                      resultado = "ARBOL -> NO RESPONDER (marcado leido)"
+                      print(f"    RESULTADO -> {resultado}")
+                      if not dry:
+                          marcar_agente(msg, marcar_leido=True)
+                      con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                  (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                   categoria, flags, "", "", "", resultado, ""))
+                      con.commit(); continue
+                  # Els documents promesos han d'existir de veritat
+                  rutas_adj, falten_adj = comprobar_adjuntos(adj_arbol)
+                  if falten_adj:
+                      print(f"    ARBRE: falten documents al servidor ({', '.join(falten_adj)})"
+                            " — ho mira una persona")
+                      resultado = "ARBOL -> falta adjunto en el servidor"
+                      print(f"    RESULTADO -> {resultado}")
+                      if not dry:
+                          marcar_agente(msg, marcar_leido=True)
+                          mover_a_calaix(msg, carpeta, CALAIX_DIFICIL)
+                      con.commit(); continue
+                  arbol_txt = ""
+                  if txt_arbol:
+                      print(f"    ARBRE: text fixat ({len(txt_arbol)} car."
+                            + (f", {len(rutas_adj)} adjunt(s)" if rutas_adj else "") + ")")
+                      arbol_txt = ("\n=== TEXTO OBLIGATORIO DE LA RESPUESTA ===\n" + txt_arbol +
+                                   "\n=== FIN DEL TEXTO OBLIGATORIO ===\n"
+                                   "Este texto es la respuesta que la empresa ha decidido para este caso. "
+                                   "USALO COMO CONTENIDO: puedes adaptar el tono y enlazarlo con naturalidad, "
+                                   "pero NO cambies los datos, NO quites informacion y NO anadas nada que no "
+                                   "este aqui. No pongas saludo ni despedida: se anaden aparte.\n")
                   ya_dados = datos_ya_facilitados(asunto, cuerpo)
                   ya_dados_txt = ""
                   if ya_dados:
@@ -1564,7 +1690,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                       print(f"    el client ja ha donat: {detall} (no se li demanara)")
                   red = llamar(ia, PROMPT_REDACTOR,
                                f"DATOS VERIFICADOS: {datos}\nHISTORIAL PREVIO con este cliente:\n{hilo_txt}\nCATEGORIA: {categoria}\n{guia}"
-                               + ya_dados_txt +
+                               + arbol_txt + ya_dados_txt +
                                f"MENSAJE del cliente:\nAsunto: {asunto}\nCuerpo: {cuerpo}")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                   respuesta = formatear_respuesta(respuesta, categoria)
@@ -1674,6 +1800,8 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                             reply.Categories = ", ".join(cats)
                         except Exception:
                             pass
+                    if rutas_adj:
+                        adjuntar(reply, rutas_adj)
                     reply.Save()  # <- ESBORRANY. Mai .Send()
                     marcar_agente(msg, marcar_leido=str(esc.get("marcar_leido", "si")).lower() in ("si", "sí", "true", "on", "1"))
                     creados += 1
@@ -1723,6 +1851,7 @@ if __name__ == "__main__":
     args = ap.parse_args()
     esc = cargar_escenario()
     PLANTILLAS.update(cargar_plantillas())
+    cargar_arbol()
     TABLA_CARTEL.update(cargar_tabla_cartel())
     con = log_init()
     if args.real:

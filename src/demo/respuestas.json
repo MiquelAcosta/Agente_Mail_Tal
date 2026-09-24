@@ -1,0 +1,64 @@
+{
+ "_nota": "Textos de l'arbre de respostes. Els edita l'equip. Sense salutacio ni comiat: el sistema els posa.",
+ "por_estado": {
+  "E1": "Nos complace informarle de que su expediente se encuentra completo y correctamente revisado. En estos momentos, estamos a la espera de que el perito nos remita su informe pericial, un paso imprescindible antes de la interposición de la demanda ante el juzgado.\n\nQueremos transmitirle tranquilidad: su caso está en curso y bajo control, simplemente se encuentra en la fase técnica de elaboración del informe. Este trabajo requiere un análisis detallado y personalizado por parte del perito, ya que cada caso se estudia de manera individual para garantizar la máxima precisión y solidez jurídica.\n\nEntendemos que la espera pueda generar inquietud, pero puede estar tranquilo/a: no hay ningún retraso ajeno al proceso habitual, y tan pronto como recibamos su informe, procederemos con los siguientes pasos necesarios para continuar hacia la demanda.\n\nLe mantendremos puntualmente informado/a en cuanto el informe esté finalizado o se produzca cualquier avance relevante en su expediente.",
+  "E2": "Le informamos de que ya hemos recibido su informe pericial. La cuantía determinada por el perito es de {IMPORTE}.\n\nNo obstante, el informe completo no podemos remitirlo íntegramente.\n\nActualmente estamos finalizando todos los informes periciales correspondientes a esta tanda de clientes. Una vez cerrados, se realizará una última revisión conforme a los parámetros y criterios técnicos que nos exige el Juzgado, con el fin de asegurar que toda la documentación cumple estrictamente con los requisitos procesales.\n\nTras esta revisión final, se procederá a la interposición de la demanda, en la cual usted estará incluido/a.\n\nSeguimos trabajando para impulsar el procedimiento y le mantendremos informado/a de cualquier novedad relevante.",
+  "E3": "Necesitamos que nos mande la siguiente documentación:\n{DOC_FALTA}",
+  "E3.1": "Necesitamos que nos mande la siguiente documentación:\n{DOC_FALTA}",
+  "E4": "Su expediente está anotado en Diligencias Preliminares. Esto significa que, ante la imposibilidad de que nos pueda facilitar el documento de compra, trataremos de conseguirlo nosotros por vía judicial.\n\nNo obstante, si aún no ha solicitado el Modelo 576 y lo solicita y lo consigue, esto puede ayudar a acelerar el proceso. Le adjuntamos los pasos a seguir.\n\nEn cuanto tengamos novedades, le informaremos.",
+  "E5": "Su expediente está anotado en Diligencias Preliminares. Esto significa que, ante la imposibilidad de que nos pueda facilitar el documento de compra, trataremos de conseguirlo nosotros por vía judicial.\n\nVemos que ha solicitado el 576; en ese caso deberá ir revisando su área privada de Hacienda, ya que se lo pueden dejar subido en cualquier momento.\n\nEn cuanto tengamos novedades, le informaremos.",
+  "E6": "__HUMANO__",
+  "E7": "__HUMANO__"
+ },
+ "adjuntos_estado": {
+  "E4": [
+   "SOLICITAR_MODELO_576_ONLINE.pdf"
+  ]
+ },
+ "por_intencion": {
+  "I2": "Por el momento no podemos darle una fecha aproximada de cobro, ya que las demandas se van interponiendo por orden de clientes. En cualquier caso, le iremos informando en todo momento de cualquier avance o novedad.",
+  "I3": "Entre un 10% y un 15% de lo que llegó a pagar, añadiéndole los intereses de demora, lo que hará aumentar el importe final a recuperar.",
+  "I4": "Necesitamos que nos mande la siguiente documentación:\n{DOC_FALTA}",
+  "I5": "__HUMANO__",
+  "I6": "__HUMANO__",
+  "I7": "__HUMANO__",
+  "I8": "__NO_RESPONDER__",
+  "I9": "El 30% más IVA en concepto de honorarios de lo que se llegue a recuperar al final del procedimiento.",
+  "I10": "__HUMANO__",
+  "I11": "Un agente se pondrá en contacto con usted a la mayor brevedad posible.",
+  "I12": "__NO_RESPONDER__",
+  "I13": "Queremos informarle de que su expediente se encuentra incluido dentro de la interrupción de la prescripción realizada por nuestro equipo jurídico en relación con la reclamación del cártel de fabricantes de vehículos.\n\nEsto supone que sus derechos quedan protegidos y que los plazos legales de la reclamación han quedado interrumpidos mientras seguimos avanzando con las actuaciones correspondientes.",
+  "I14": "__HUMANO__"
+ },
+ "adjuntos_intencion": {
+  "I4": {
+   "factura": "SOLICITAR_MODELO_576_ONLINE.pdf",
+   "ficha tecnica": "PASOS_INFORME_COMPLETO_DGT.pdf",
+   "permiso de circulacion": "PASOS_INFORME_COMPLETO_DGT.pdf"
+  }
+ },
+ "doc_textos": {
+  "factura": "Factura de compra o cualquier comprobante de pago donde aparezca el precio del vehículo (en caso de no conservarla deberá solicitar en Hacienda el modelo 576 siguiendo los pasos que le indicamos en el PDF adjunto).",
+  "ficha tecnica": "Ficha técnica o permiso de circulación (en caso de no tenerla deberá solicitar en la DGT el informe completo del vehículo).",
+  "dni": "DNI del titular de la compra del vehículo.",
+  "poderes": "Poderes de representación (apoderamiento apud acta)."
+ },
+ "categoria_a_intencion": {
+  "estado_reclamacion": "I1",
+  "informacion_general": "I1",
+  "retraso_demora": "I2",
+  "importe_indemnizacion": "I3",
+  "peticion_documentacion": "I4",
+  "confirmacion_documentacion": "I5",
+  "envio_documentacion": "I5",
+  "cancelacion_desistimiento": "I6",
+  "herencia_sucesion": "I7",
+  "cambio_datos": "I8",
+  "comision_honorarios": "I9",
+  "elegibilidad_vehiculo": "I10",
+  "contacto_llamada": "I11",
+  "cortesia_breve": "I12",
+  "prescripcion": "I13",
+  "vehiculo_vendido": "I14"
+ }
+}
