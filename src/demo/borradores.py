@@ -764,6 +764,15 @@ def esta_afectado(marca, fecha_compra):
     return ini <= str(fecha_compra)[:10] <= fin
 
 
+def calaix_para_humano(categoria):
+    """A quin calaix ha d'anar un cas que no s'automatitza.
+
+    Un desistiment ha d'anar a 3 DESISTIMIENTO, no a 2 DIFICIL: el treballador
+    ha de trobar cada cosa al seu lloc."""
+    m = ARBOL.get("calaix_humano", {})
+    return m.get(categoria or "", m.get("_defecto", CALAIX_DIFICIL))
+
+
 def texto_del_arbol(categoria, ficha):
     """Text OBLIGATORI segons l'arbre: (texto, adjuntos, accion).
 
@@ -1667,7 +1676,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                       print(f"    RESULTADO -> {resultado}")
                       if not dry:
                           marcar_agente(msg, marcar_leido=True)
-                          mover_a_calaix(msg, carpeta, CALAIX_DIFICIL)
+                          _cal = calaix_para_humano(categoria)
+                          if mover_a_calaix(msg, carpeta, _cal):
+                              print(f"    -> mogut a {_cal}")
                       con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                                   " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                                   (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
