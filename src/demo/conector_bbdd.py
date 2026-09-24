@@ -54,10 +54,19 @@ def _importe_perito(valor):
     return ent.replace(",", ".") + "," + dec + " €"
 
 
+NEGATIUS = ("", "no", "n", "0", "false", "null", "none", "-", "pendiente",
+            "pendent", "abierto", "sin cerrar", "nan")
+
+
 def _si(v):
-    """True si el camp marca afirmatiu (Si/Sí/S/1/X/True...)."""
+    """True si el camp marca afirmatiu.
+
+    NO es una llista tancada de valors: a la BBDD hi ha "cerrado", "OK",
+    "Si", "1", "x"... Qualsevol valor amb contingut que no sigui explicitament
+    negatiu compta com a afirmatiu. Amb la llista tancada, "cerrado" es llegia
+    com a NO i l'expedient no arribava mai a l'estat que li tocava."""
     t = str(v or "").strip().lower()
-    return t in ("si", "sí", "s", "1", "x", "true", "yes", "ok")
+    return bool(t) and t not in NEGATIUS
 
 
 def _componer_estado(d):
