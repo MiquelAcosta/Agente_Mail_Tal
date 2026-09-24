@@ -1635,6 +1635,12 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                   print("    REDACTOR -> escribiendo...")
                   txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, mail.get("ficha"))
+                  if accion_arbol == "" and str(esc.get("solo_arbol", "si")).lower() \
+                          not in ("no", "false", "off", "0"):
+                      # No hi ha regla a l'arbre per a aquest cas. Abans que el model
+                      # s'inventi una resposta, ho mira una persona.
+                      print(f"    ARBRE: cap regla per a '{categoria}' — ho mira una persona")
+                      accion_arbol = "humano"
                   if accion_arbol == "humano":
                       print("    ARBRE: aquest cas no s'automatitza — ho mira una persona")
                       resultado = "ARBOL -> HUMANO (sin borrador)"
@@ -1679,6 +1685,46 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                    "USALO COMO CONTENIDO: puedes adaptar el tono y enlazarlo con naturalidad, "
                                    "pero NO cambies los datos, NO quites informacion y NO anadas nada que no "
                                    "este aqui. No pongas saludo ni despedida: se anaden aparte.\n")
+                  if txt_arbol and str(esc.get("texto_literal", "si")).lower() \
+                          not in ("no", "false", "off", "0"):
+                      # COPY-PASTE: la situacio es clara i l'equip ja ha decidit el text.
+                      # No es crida el redactor: s'envia EXACTAMENT el que diu l'arbre.
+                      # Aixi no hi ha marge per inventar res, i a mes no gasta model.
+                      respuesta = formatear_respuesta(txt_arbol, categoria)
+                      confianza, doc = "alta", "NINGUNO"
+                      print("    ARBRE: text LITERAL (no passa pel redactor)")
+                      print("    ---- RESPUESTA " + "-" * 38)
+                      for lin in respuesta.split("\n"):
+                          print(f"    | {lin}")
+                      print("    " + "-" * 53)
+                      resultado = ("BORRADOR (dry: no creado) [ARBOL literal]" if dry
+                                   else "BORRADOR CREADO [ARBOL literal]")
+                      if not dry:
+                          claves_final = set(claves_msg)
+                          _rn = (rem or "").strip().lower()
+                          if "@" in _rn:
+                              claves_final.add("cli:" + _rn)
+                          if claves_final & ya_con_borrador:
+                              print("    AGRUPAT: el client ja te esborrany en aquesta passada")
+                              continue
+                          ya_con_borrador |= claves_final
+                          reply = msg.Reply()
+                          _dest = str(esc.get("borradores_para", "") or "").strip()
+                          if _dest:
+                              reply.To = _dest
+                          reply.Body = respuesta
+                          if rutas_adj:
+                              adjuntar(reply, rutas_adj)
+                          reply.Save()
+                          marcar_agente(msg, marcar_leido=True)
+                          creados += 1
+                          print(f"    esborrany desat (per a: {_dest or rem})")
+                      con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                  (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                   categoria, flags, confianza, doc, "ARBOL", resultado, respuesta))
+                      con.commit()
+                      continue
                   ya_dados = datos_ya_facilitados(asunto, cuerpo)
                   ya_dados_txt = ""
                   if ya_dados:
