@@ -793,6 +793,36 @@ def calaix_para_humano(categoria):
     return m.get(categoria or "", m.get("_defecto", CALAIX_DIFICIL))
 
 
+def codigo_estado(ficha):
+    """Codi d'estat (E1..E6) de la fitxa.
+
+    Si el camp 'estado_codigo' no hi es —perque la fitxa ve del triatge i no
+    del conector— es dedueix de la frase de l'estat. Aixi l'arbre funciona
+    vingui la fitxa d'on vingui."""
+    f = ficha or {}
+    cod = f.get("estado_codigo")
+    if cod:
+        return cod
+    t = str(f.get("estado") or "").lower()
+    if not t:
+        return None
+    if "no elegible" in t or "no apto" in t:
+        return "E6"
+    if "informe pericial" in t and ("recibido" in t or "completado" in t or "con informe" in t):
+        return "E2"
+    if "espera del informe" in t or "sin informe" in t:
+        return "E1"
+    if "diligencias" in t:
+        if "sin el modelo 576" in t or "no solicitado" in t:
+            return "E4"
+        return "E5" if ("576 solicitado" in t or "con el modelo 576" in t) else "E4"
+    if "pendiente de documentaci" in t or "falta" in t:
+        return "E3.1"
+    if "revisi" in t or "preparaci" in t or "tramitaci" in t:
+        return "E3"
+    return None
+
+
 def texto_del_arbol(categoria, ficha):
     """Text OBLIGATORI segons l'arbre: (texto, adjuntos, accion).
 
@@ -805,7 +835,7 @@ def texto_del_arbol(categoria, ficha):
         # No hi ha regla per a aquesta categoria. Si sabem l'estat del client,
         # es fa servir el text de l'estat com a base (el model l'adapta a la
         # pregunta). Nomes si no sabem res, ho mira una persona.
-        cod = (ficha or {}).get("estado_codigo")
+        cod = codigo_estado(ficha)
         if cod and ARBOL.get("fallback_estado"):
             base = ARBOL.get("por_estado", {}).get(cod, "")
             if base and base not in ("__HUMANO__", "__NO_RESPONDER__"):
@@ -823,7 +853,7 @@ def texto_del_arbol(categoria, ficha):
     adj = []
     # I1 (estat de la reclamacio) depen de l'ESTAT de l'expedient
     if inten == "I1":
-        cod = (ficha or {}).get("estado_codigo") or "E7"
+        cod = codigo_estado(ficha) or "E7"
         print(f"    ARBRE: intencio {inten} | estat {cod}"
               + (" | import: " + str((ficha or {}).get("importe_perito"))
                  if cod == "E2" else ""))
