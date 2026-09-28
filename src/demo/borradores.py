@@ -952,6 +952,29 @@ def texto_del_arbol(categoria, ficha):
     return txt, adj, "texto"
 
 
+def destinatario_real(msg, rem, reenviadores, destino_fijo=""):
+    """A qui ha d'anar l'esborrany.
+
+    Si el correu ens l'ha REENVIAT un company, msg.Reply() respondria al company,
+    no al client. Aqui es posa el client que ja s'ha resolt (extret del cos del
+    reenviament). Si no es pot determinar, es deixa el que hi posi Outlook i
+    s'avisa: val mes que ho miri una persona que enviar-ho a qui no toca."""
+    if destino_fijo:
+        return destino_fijo, "destinatari fix de l'escenario"
+    r = (rem or "").strip().lower()
+    if "@" not in r or r == "desconocido":
+        return "", "no s'ha pogut determinar el client"
+    if es_reenviador(r, reenviadores):
+        return "", "el client resolt es una adreca interna"
+    try:
+        actual = str(getattr(msg, "SenderEmailAddress", "") or "").lower()
+    except Exception:
+        actual = ""
+    if es_reenviador(remitente_smtp(msg) or actual, reenviadores):
+        return r, "REENVIAMENT: s'adreca al client, no al company"
+    return r, ""
+
+
 def remitente_smtp(msg):
     """Adreca SMTP REAL del remitent, o None.
 
@@ -1905,9 +1928,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                               continue
                           ya_con_borrador |= claves_final
                           reply = msg.Reply()
-                          _dest = str(esc.get("borradores_para", "") or "").strip()
+                          _dest, _why = destinatario_real(
+                              msg, rem, esc.get("reenviadores", []),
+                              str(esc.get("borradores_para", "") or "").strip())
                           if _dest:
                               reply.To = _dest
+                              if _why:
+                                  print(f"    destinatari: {_dest} ({_why})")
+                          elif _why:
+                              print(f"    ATENCIO destinatari: {_why} — REVISAR abans d'enviar")
                           reply.Body = respuesta
                           if rutas_adj:
                               adjuntar(reply, rutas_adj)
@@ -1986,6 +2015,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                     ya_con_borrador |= claves_final
                     reply = msg.Reply()
+                    _dest, _why = destinatario_real(
+                        msg, rem, esc.get("reenviadores", []),
+                        str(esc.get("borradores_para", "") or "").strip())
+                    if _dest:
+                        reply.To = _dest
+                        if _why:
+                            print(f"    destinatari: {_dest} ({_why})")
+                    elif _why:
+                        print(f"    ATENCIO destinatari: {_why} — REVISAR abans d'enviar")
                     cuerpo_final = respuesta   # nomes el missatge generat, sense fil citat
                     previos = contexto_grupo.get(mail_id) or []
                     if previos:
