@@ -823,6 +823,57 @@ def codigo_estado(ficha):
     return None
 
 
+def arbol_como_referencia(ficha):
+    """Tot l'arbre en text, perque el model triï ell mateix.
+
+    Es dona el text de l'ESTAT del client (nomes el que li correspon) i tots
+    els textos per tema. Si cap encaixa, el model respon amb logica amb la
+    fitxa i l'historial, sense inventar dades."""
+    if not ARBOL:
+        return ""
+    cod = codigo_estado(ficha)
+    parts = []
+    if cod:
+        t = ARBOL.get("por_estado", {}).get(cod, "")
+        if t and t not in ("__HUMANO__", "__NO_RESPONDER__"):
+            if "{IMPORTE}" in t:
+                imp = (ficha or {}).get("importe_perito")
+                t = t.replace("{IMPORTE}", imp) if imp else ""
+            if "{DOC_FALTA}" in t:
+                falten = (ficha or {}).get("documentos_pendientes") or []
+                dt = ARBOL.get("doc_textos", {})
+                t = (t.replace("{DOC_FALTA}", "\n".join("- " + dt.get(str(d).lower(), d)
+                                                        for d in falten)) if falten else "")
+            if t:
+                parts.append("TEXTO OFICIAL PARA EL ESTADO ACTUAL DE ESTE CLIENTE "
+                             f"({cod}). Si el cliente pregunta por el estado de su "
+                             "reclamacion, por plazos o por como va su caso, responde "
+                             "CON ESTE TEXTO, tal cual:\n" + t)
+    otros = []
+    NOM = {"I2": "si pregunta cuando cobrara o por que tarda",
+           "I3": "si pregunta cuanto dinero recuperara",
+           "I4": "si pregunta que documentacion hace falta",
+           "I5": "si dice que ya ha enviado documentacion",
+           "I6": "si quiere desistir o cancelar",
+           "I9": "si pregunta por la comision u honorarios",
+           "I11": "si pide que le llamen por telefono",
+           "I13": "si pregunta por la prescripcion o si aun esta a tiempo"}
+    for k, desc in NOM.items():
+        t = ARBOL.get("por_intencion", {}).get(k, "")
+        if t and t not in ("__HUMANO__", "__NO_RESPONDER__") and "{DOC_FALTA}" not in t:
+            otros.append(f"· {desc}:\n  {t}")
+    if otros:
+        parts.append("TEXTOS OFICIALES POR TEMA (usa el que encaje, tal cual):\n"
+                     + "\n".join(otros))
+    parts.append(
+        "SI NINGUNO DE LOS TEXTOS ANTERIORES RESPONDE A LO QUE PREGUNTA EL CLIENTE: "
+        "no fuerces ninguno. Responde de forma logica y breve a lo que pregunta, "
+        "usando los DATOS VERIFICADOS y el historial. No inventes importes, plazos, "
+        "fechas ni documentos. Si no tienes el dato, di que un companero se lo "
+        "confirmara. No pongas saludo ni despedida: se anaden aparte.")
+    return "\n\n".join(parts)
+
+
 def texto_del_arbol(categoria, ficha):
     """Text OBLIGATORI segons l'arbre: (texto, adjuntos, accion).
 
@@ -848,7 +899,11 @@ def texto_del_arbol(categoria, ficha):
                     base = ARBOL.get("por_estado", {}).get("E3", "")
                     if not base:
                         return "", [], "humano"
-                return base, list(ARBOL.get("adjuntos_estado", {}).get(cod, [])), "adaptar"
+                # Abans es tornava el text de l'estat com a obligatori. Pero si el
+                # client pregunta una altra cosa (apoderaments, certificat digital),
+                # aquell text no respon res. Millor donar-li l'arbre sencer i que
+                # triï: si cap encaixa, respon amb logica.
+                return "", [], ""
         return "", [], ""
     adj = []
     # I1 (estat de la reclamacio) depen de l'ESTAT de l'expedient
@@ -1743,6 +1798,12 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                   print("    REDACTOR -> escribiendo...")
                   txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, ficha)
+                  if accion_arbol == "" and txt_arbol == "":
+                      ref = arbol_como_referencia(ficha)
+                      if ref:
+                          txt_arbol, accion_arbol = ref, "referencia"
+                          print("    ARBRE: cap text exacte — es dona l'arbre sencer"
+                                " al model perque triï")
                   if accion_arbol == "" and str(esc.get("solo_arbol", "no")).lower() \
                           not in ("no", "false", "off", "0"):
                       # No hi ha regla a l'arbre per a aquest cas. Abans que el model
@@ -1809,7 +1870,11 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                   if txt_arbol:
                       print(f"    ARBRE: text fixat ({len(txt_arbol)} car."
                             + (f", {len(rutas_adj)} adjunt(s)" if rutas_adj else "") + ")")
-                      arbol_txt = ("\n=== TEXTO OBLIGATORIO DE LA RESPUESTA ===\n" + txt_arbol +
+                      if accion_arbol == "referencia":
+                          arbol_txt = ("\n=== TEXTOS OFICIALES DE LA EMPRESA ===\n"
+                                       + txt_arbol + "\n=== FIN ===\n")
+                      else:
+                          arbol_txt = ("\n=== TEXTO OBLIGATORIO DE LA RESPUESTA ===\n" + txt_arbol +
                                    "\n=== FIN DEL TEXTO OBLIGATORIO ===\n"
                                    "Este texto es la respuesta que la empresa ha decidido para este caso. "
                                    "USALO COMO CONTENIDO: puedes adaptar el tono y enlazarlo con naturalidad, "
