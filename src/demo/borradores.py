@@ -1275,7 +1275,8 @@ def fecha_texto(t):
     return "%04d-%02d-%02d %02d:%02d:%02d" % t
 
 
-def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails):
+def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mails,
+                     solo_clasificar=False, ruta_csv=""):
     global PLANTILLAS
     import win32com.client
     ia = esc["ia"]
@@ -1447,6 +1448,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     n = creados = 0
     omesos_registre = 0
     ya_con_borrador = set()   # clients/fils que JA tenen esborrany en aquesta passada
+    filas_csv = []            # una fila per mail, per al CSV de sortida
     motivos_sin = {}          # per que NO s'ha redactat cada mail
 
     def _apunta(motivo):
@@ -1748,6 +1750,19 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                 " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                                 (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
                                  categoria, flags, "", "", "", resultado, ""))
+                    con.commit()
+                    continue
+                if solo_clasificar:
+                    filas_csv.append({
+                        "remitente": rem, "asunto": asunto,
+                        "pregunta": cuerpo_nuevo(cuerpo)[:900].replace("\n", " "),
+                        "categoria": categoria, "flags": flags,
+                        "estado": (ficha or {}).get("estado", ""),
+                        "estado_codigo": codigo_estado(ficha) or "",
+                        "matricula": (ficha or {}).get("matricula", ""),
+                        "importe": (ficha or {}).get("importe_perito", ""),
+                        "decision": "(solo clasificar)", "respuesta": ""})
+                    print(f"    RESULTADO -> nomes classificat: {categoria}")
                     con.commit()
                     continue
                 cats_doc = CATEGORIAS_DOCUMENTOS | {c_.strip().lower() for c_ in
@@ -2133,6 +2148,15 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 for lin in respuesta.split("\n"):
                     print(f"    | {lin}")
                 print("    " + "-" * 53)
+            filas_csv.append({
+                "remitente": rem, "asunto": asunto,
+                "pregunta": cuerpo_nuevo(cuerpo)[:900].replace("\n", " "),
+                "categoria": categoria, "flags": flags,
+                "estado": (ficha or {}).get("estado", ""),
+                "estado_codigo": codigo_estado(ficha) or "",
+                "matricula": (ficha or {}).get("matricula", ""),
+                "importe": (ficha or {}).get("importe_perito", ""),
+                "decision": resultado, "respuesta": (respuesta or "").replace("\n", " ")[:1500]})
             print(f"    RESULTADO -> {resultado}")
             con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -2146,6 +2170,28 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
         print("\n    PER QUE NO S'HA REDACTAT (recompte):")
         for mot, cnt in sorted(motivos_sin.items(), key=lambda p: -p[1]):
             print(f"       {cnt:4}  {mot}")
+    if ruta_csv and filas_csv:
+        import csv as _csv
+        cols = ["remitente", "asunto", "pregunta", "categoria", "flags", "estado",
+                "estado_codigo", "matricula", "importe", "decision", "respuesta"]
+        try:
+            # utf-8-sig perque Excel obri be els accents
+            with open(ruta_csv, "w", newline="", encoding="utf-8-sig") as fh:
+                w = _csv.DictWriter(fh, fieldnames=cols, delimiter=";")
+                w.writeheader()
+                for f_ in filas_csv:
+                    w.writerow({c: f_.get(c, "") for c in cols})
+            print(f"\n    CSV desat: {ruta_csv}  ({len(filas_csv)} files)")
+        except Exception as e:
+            print(f"\n    (no s'ha pogut desar el CSV: {str(e)[:70]})")
+    if filas_csv:
+        from collections import Counter
+        print("\n    RECOMPTE PER CATEGORIA")
+        for k, v in Counter(f_["categoria"] or "(cap)" for f_ in filas_csv).most_common():
+            print(f"       {v:5}  {k}")
+        print("    RECOMPTE PER ESTAT")
+        for k, v in Counter(f_["estado_codigo"] or "(sense fitxa)" for f_ in filas_csv).most_common():
+            print(f"       {v:5}  {k}")
     print(f"\nFet: {min(n, max_mails)} mails processats, {creados} esborranys creats.{extra}" if not dry
           else f"\nFet (dry): {min(n, max_mails)} mails processats, 0 esborranys (mode assaig).{extra}")
 
@@ -2170,6 +2216,10 @@ if __name__ == "__main__":
     ap.add_argument("--registrar", action="store_true",
                     help="apuntar els mails de la carpeta al registre SENSE fer res (vacuna contra duplicats)")
     ap.add_argument("--informe", action="store_true")
+    ap.add_argument("--solo-clasificar", dest="solo_clasificar", action="store_true",
+                    help="nomes classifica (sense redactar): scan barat de tota la bustia")
+    ap.add_argument("--csv", metavar="FITXER", default="",
+                    help="desa un CSV amb pregunta, resposta i decisio de cada mail")
     args = ap.parse_args()
     esc = cargar_escenario()
     PLANTILLAS.update(cargar_plantillas())
@@ -2229,7 +2279,8 @@ if __name__ == "__main__":
         con.close(); os._exit(0)
     elif args.outlook:
         escalfar(esc["ia"])
-        procesar_carpeta(args.outlook, args.carpeta, esc, con, bbdd, args.dry, args.max)
+        procesar_carpeta(args.outlook, args.carpeta, esc, con, bbdd, args.dry, args.max,
+                     args.solo_clasificar, args.csv)
         print(); informe(con)
         import gc; gc.collect()
         con.close()
