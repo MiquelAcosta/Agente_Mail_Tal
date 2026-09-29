@@ -858,6 +858,8 @@ def codigo_estado(ficha):
         return "E5" if ("576 solicitado" in t or "con el modelo 576" in t) else "E4"
     if "pendiente de documentaci" in t or "falta" in t:
         return "E3.1"
+    if "sin información de estado" in t or "sin informacion de estado" in t:
+        return "E8"
     if "revisi" in t or "preparaci" in t or "tramitaci" in t:
         return "E3"
     return None
@@ -1466,6 +1468,9 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
     n = creados = 0
     omesos_registre = 0
     ya_con_borrador = set()   # clients/fils que JA tenen esborrany en aquesta passada
+    # Si l'equip vol veure el comptador de pendents, els mails tractats NO es
+    # marquen com a llegits (l'etiqueta 'Agente' hi va igualment).
+    MARCAR_LEIDO = str(esc.get("marcar_leido", "si")).lower() not in ("no", "false", "off", "0")
     filas_csv = []            # una fila per mail, per al CSV de sortida
     motivos_sin = {}          # per que NO s'ha redactat cada mail
 
@@ -1501,7 +1506,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 if ya_registrado:
                     print("    (ja constava al registre: igualment s'aparta)")
                 if not dry:
-                    marcar_agente(msg, marcar_leido=True)
+                    marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                     # El germa no es queda al calaix: s'aparta a MULTIPLES, aixi
                     # el calaix nomes conte el mail que s'ha contestat.
                     movido_mult = mover_a_multiples(msg, carpeta)
@@ -1544,7 +1549,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                         print("    PORTA ARXIUS: NO s'aparta ni es marca —"
                               " ha de quedar visible per a una persona")
                     elif not dry:
-                        marcar_agente(msg, marcar_leido=True)
+                        marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                         movido_h = mover_a_multiples(msg, carpeta)
                         if movido_h:
                             print(f"    -> apartat a la carpeta {CARPETA_MULTIPLES}")
@@ -1565,7 +1570,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 print("    AGRUPAT (xarxa): el client ja te esborrany en aquesta passada"
                       " — es contesta al mail mes recent")
                 if not dry:
-                    marcar_agente(msg, marcar_leido=True)
+                    marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                 con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                             " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                             (datetime.now(timezone.utc).isoformat(), mail_id, "", str(msg.Subject or ""),
@@ -1892,6 +1897,16 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                   print("    REDACTOR -> escribiendo...")
                   txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, ficha)
+                  # El text literal NOMES si la pregunta es clarament d'estat.
+                  # Si el client pregunta una altra cosa, forçar-li el text de
+                  # l'estat no respon res: millor donar-li l'arbre al model.
+                  if accion_arbol == "texto" and \
+                     str(esc.get("literal_solo_estado", "si")).lower() not in ("no","false","off","0") \
+                     and categoria not in ("estado_reclamacion", "cancelacion_desistimiento",
+                                           "coste_comision", "cortesia_breve"):
+                      print(f"    ARBRE: '{categoria}' no es una pregunta d'estat —"
+                            " el model decideix amb l'arbre davant")
+                      txt_arbol, accion_arbol = "", ""
                   if accion_arbol == "" and txt_arbol == "":
                       ref = arbol_como_referencia(ficha)
                       if ref:
@@ -1911,7 +1926,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                       resultado = f"ARBOL -> sin regla para '{categoria}' (sin borrador)"
                       print(f"    RESULTADO -> {resultado}")
                       if not dry:
-                          marcar_agente(msg, marcar_leido=True)
+                          marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                       con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                                   " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                                   (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
@@ -1929,7 +1944,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                               print(f"    -> mogut a {_cal} (SENSE marcar: es podra"
                                     " tractar alla)")
                           else:
-                              marcar_agente(msg, marcar_leido=True)
+                              marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                       # Si s'ha mogut, NO es marca ni s'apunta al registre: si no,
                       # al nou calaix el sistema el saltaria per "ja tractat".
                       if not _mogut:
@@ -1943,7 +1958,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                       resultado = "ARBOL -> NO RESPONDER (marcado leido)"
                       print(f"    RESULTADO -> {resultado}")
                       if not dry:
-                          marcar_agente(msg, marcar_leido=True)
+                          marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                       con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
                                   " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                                   (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
@@ -1957,7 +1972,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                       resultado = "ARBOL -> falta adjunto en el servidor"
                       print(f"    RESULTADO -> {resultado}")
                       if not dry:
-                          marcar_agente(msg, marcar_leido=True)
+                          marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                           mover_a_calaix(msg, carpeta, CALAIX_DIFICIL)
                       con.commit(); continue
                   arbol_txt = ""
@@ -2013,7 +2028,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                           if rutas_adj:
                               adjuntar(reply, rutas_adj)
                           reply.Save()
-                          marcar_agente(msg, marcar_leido=True)
+                          marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                           creados += 1
                           print(f"    esborrany desat (per a: {_dest or rem})")
                       con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
@@ -2074,13 +2089,13 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                           " en aquesta passada — es contesta al mail mes recent")
                     resultado = "AGRUPADO (un solo borrador por cliente y pasada)"
                     if not dry:
-                        marcar_agente(msg, marcar_leido=True)
+                        marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                 elif mail_id in agrupados_omitir:
                     print("    BLOQUEJAT: no es el mail mes nou del client —"
                           " l'esborrany va al mes recent")
                     resultado = "AGRUPADO (no es el mail mas reciente)"
                     if not dry:
-                        marcar_agente(msg, marcar_leido=True)
+                        marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
                 elif dry:
                     ya_con_borrador |= claves_final
                     resultado = "BORRADOR (dry: no creado)" + avisos
@@ -2291,7 +2306,7 @@ if __name__ == "__main__":
                               (datetime.now(timezone.utc).isoformat(), mid, "", str(msg.Subject or ""),
                                "", "", "", "", "", "REGISTRADO (vacuna, sense esborrany)", ""))
             n += cur.rowcount
-            marcar_agente(msg, marcar_leido=True)  # marca indeleble + llegit: veterans segellats
+            marcar_agente(msg, marcar_leido=MARCAR_LEIDO)  # marca indeleble + llegit: veterans segellats
         con.commit()
         print(f"Vacunats {n} mails de '{args.carpeta}': marca 'Agente' + llegits + registre. Mai mes es tocaran.")
         con.close(); os._exit(0)

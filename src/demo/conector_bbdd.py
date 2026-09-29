@@ -121,6 +121,16 @@ def _componer_estado(d):
     if faltan and not (d.get("envio_fyg") or d.get("estado_fyg")):
         return "E3.1", "pendiente de documentación: " + ", ".join(faltan), interno
 
+    # --- Sense CAP dada d'estat: no sabem res -------------------------------
+    # Abans aixo tornava E3 ("en revision"), i el client rebia aquell text
+    # encara que la fitxa estigues completament buida. Dir que un expedient
+    # esta en revisio sense saber-ho es inventar-s'ho: millor, una persona.
+    claus = ("coche_cerrado", "estado_perito", "Diligencias_Preliminares",
+             "Solicitando_576", "envio_fyg", "estado_fyg", "estado_minsait",
+             "procedimiento", "estado_vehiculo_ayp")
+    if not any(str(d.get(k) or "").strip() for k in claus):
+        return "E8", "sin información de estado en la base de datos", interno
+
     # --- Incomplet, sense diligencies --------------------------------------
     return "E3", "documentación en revisión, expediente en preparación", interno
 
