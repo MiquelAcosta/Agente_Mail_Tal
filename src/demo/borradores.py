@@ -667,13 +667,31 @@ RE_DNI = re.compile(r"\b\d{7,8}\s?[A-HJ-NP-TV-Z]\b", re.IGNORECASE)
 RE_TEL = re.compile(r"\b[6789]\d{2}[\s.-]?\d{3}[\s.-]?\d{3}\b")
 
 
+RE_AVIS_MS = re.compile(
+    r"^[\s\[]*No suele recibir correo[^\n]*?"
+    r"(?:aka\.ms/LearnAboutSenderIdentification[^\s>\]]*)[\s>\]]*", re.IGNORECASE)
+
+
+def quitar_aviso_ms(t):
+    """Treu l'avis de Microsoft del principi del cos.
+
+    'No suele recibir correo electronico de X. Por que es esto importante
+    <https://aka.ms/...>' va ENGANXAT a la pregunta del client i ocupa les
+    primeres linies, que son les que mes pesen al classificador."""
+    t = str(t or "")
+    nou_t = RE_AVIS_MS.sub("", t.lstrip(), count=1).lstrip(" []>\n\t")
+    return nou_t if nou_t.strip() else t
+
+
 def cuerpo_nuevo(cuerpo, minimo=15):
     """Nomes el que ha escrit el client AQUESTA vegada, sense el fil citat.
 
     Si no es talla, un "muchas gracias" de dues linies es classifica pel
     contingut del correu anterior que queda citat a sota, i acaba al calaix
     equivocat. El que mana es l'ultim missatge."""
-    t = str(cuerpo or "")
+    # Fora l'avis de Microsoft: ocupa les primeres linies i despista
+    # el classificador, que es el que mes pes te.
+    t = quitar_aviso_ms(cuerpo)
     marques = ("\nEl ", "\n-----Original", "\nFrom:", "\nDe:", "\n________",
                "\n> ", "\nEnviado desde", "\nObtener Outlook", "\nSent:", "\nEnviado el:")
     tall = len(t)
