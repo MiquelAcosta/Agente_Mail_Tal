@@ -96,11 +96,16 @@ def _componer_estado(d):
        or str(d.get("apto") or "").strip().lower() == "no":
         return "E6", "vehículo no elegible según la revisión", interno
 
-    # --- Expedient tancat (revisio completa) -------------------------------
+    # --- Informe pericial: MANA per si sol ---------------------------------
+    # Si hi ha informe (o import del perit), l'expedient esta en aquesta fase
+    # encara que 'coche_cerrado' estigui buit. Abans s'exigien les dues coses i
+    # clients amb informe fet rebien el text de "en revision".
+    if str(d.get("estado_perito") or "").strip() or _si(d.get("total_perito")):
+        return "E2", ("completo, con informe pericial recibido, "
+                      "pendiente de interposición de la demanda"), interno
+
+    # --- Expedient tancat, encara sense informe ----------------------------
     if _si(d.get("coche_cerrado")):
-        if str(d.get("estado_perito") or "").strip():
-            return "E2", ("completo, con informe pericial recibido, "
-                          "pendiente de interposición de la demanda"), interno
         return "E1", "completo y revisado, en espera del informe pericial", interno
 
     # --- Diligencies preliminars -------------------------------------------
