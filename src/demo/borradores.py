@@ -90,6 +90,7 @@ Reglas INQUEBRANTABLES:
 7. NO REPITAS lo ya dicho: si en el HISTORIAL PREVIO o en el hilo citado del propio mensaje ya se le pidio un documento (p.ej. el modelo 576) o ya se le dio una informacion, NO lo vuelvas a pedir ni a mencionar. Responde SOLO a lo nuevo del mensaje actual.
 8. ESTILO: nunca uses la formula "sobreprecio del cartel 2006-2013" ni menciones el rango de anyos al hablar del expediente de un cliente: di "su reclamación del cártel de coches" o simplemente "su expediente". Los anyos solo se mencionan al explicar la elegibilidad a un interesado nuevo.
 9. Documentacion pendiente: SOLO pide un documento si de verdad falta y frena el avance. Factura y contrato de compra son EQUIVALENTES: si uno consta "Sí", NUNCA pidas el otro. Si el estado del expediente indica fase de informe pericial, demanda, remitido o cerrado: la documentacion YA esta completa, NO pidas nada. Como maximo UNA linea cordial y solo si procede.
+18. NO PIDAS NUNCA el año de matriculacion, la fecha de compra, la marca, el modelo ni el numero de bastidor: esos datos los tenemos nosotros en la base de datos a partir de la matricula. Si necesitas identificar el vehiculo, pide SOLO la matricula, y solo si el cliente no la ha dado ya.
 17. El saludo va SIN NOMBRE: escribe exactamente "Buenos dias," y nunca "Buenos dias Leonor Cruz Gimenez,". No pongas el nombre ni los apellidos del cliente en ninguna parte del correo.
 16. Si la categoria es de DESISTIMIENTO o cancelacion: NUNCA termines con "Quedamos a la espera.". El cliente quiere cerrar, no se le espera nada. Cierra con "Saludos cordiales,".
 11. NUNCA digas que adjuntas, envias o dejas adjunto un documento, un PDF, una propuesta de honorarios o un formulario. NO PUEDES adjuntar archivos. Si el cliente necesita un documento, di que se lo haremos llegar, nunca que va adjunto.
@@ -463,6 +464,22 @@ def falta_la_cita(texto_respuesta, msg):
     # Es busca un tros significatiu del text original dins de l'esborrany.
     trozo = " ".join(original.split())[:40]
     return trozo not in " ".join((texto_respuesta or "").split())
+
+
+def respuesta_vacia(t):
+    """True si, despres de netejar, no queda missatge de veritat.
+
+    Si l'unic que deia la resposta era una peticio que hem eliminat (l'any de
+    matriculacio, el bastidor...), queda nomes salutacio i comiat. Aixo no es
+    pot enviar: val mes que ho miri una persona."""
+    if not t:
+        return True
+    cos = _re.sub(r"^(Buenos d[ií]as|Buenas tardes|Buenas noches|Hola)[,.:]?\s*", "",
+                  str(t).strip(), flags=_re.IGNORECASE)
+    cos = _re.sub(r"(Quedamos a la espera\.?|Saludos cordiales,?|"
+                  r"Quedamos a su disposici[oó]n[^.]*\.?)\s*$", "", cos.strip(),
+                  flags=_re.IGNORECASE).strip()
+    return len(cos) < 25
 
 
 def quitar_nota_interna(texto):
@@ -1196,6 +1213,12 @@ def formatear_respuesta(texto, categoria=""):
         if es_desist:
             pide = None                      # en desistiment, sempre comiat net
         t = t.rstrip() + "\n\n" + ("Quedamos a la espera." if pide else "Saludos cordiales,")
+    # Fora les peticions de dades que ja tenim a la BBDD (any de matriculacio,
+    # marca, model, bastidor). Es feina nostra, no del client.
+    t = _re.sub(r"[^.\n]*\b(a[nñ]o de matriculaci[oó]n|fecha de matriculaci[oó]n|"
+                r"a[nñ]o del veh[ií]culo|n[uú]mero de bastidor|"
+                r"marca y modelo del veh[ií]culo)\b[^.\n]*\.\s*", "", t, flags=_re.IGNORECASE)
+    t = _re.sub(r"\n{3,}", "\n\n", t)
     # SALUTACIO SENSE NOM: "Buenos dias Leonor Cruz Gimenez," -> "Buenos dias,".
     # El nom sencer amb cognoms queda fred i impersonal; el saludo net es mes
     # natural i no pot equivocar-se de persona.
@@ -2054,6 +2077,17 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                f"CONTEXTO del hilo (solo para entender el caso):\n{str(cuerpo or '')[:3000]}")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                   respuesta = formatear_respuesta(respuesta, categoria)
+                  if respuesta_vacia(respuesta):
+                      print("    RESPOSTA BUIDA despres de netejar — ho mira una persona")
+                      resultado = "SIN CONTENIDO UTIL (sin borrador)"
+                      print(f"    RESULTADO -> {resultado}")
+                      if not dry:
+                          marcar_agente(msg, marcar_leido=MARCAR_LEIDO)
+                      con.execute("INSERT OR IGNORE INTO borradores(ts,mail_id,remitente,asunto,categoria,flags,confianza,doc,veredicto_ia,resultado,respuesta)"
+                                  " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                                  (datetime.now(timezone.utc).isoformat(), mail_id, rem, asunto,
+                                   categoria, flags, confianza, doc, "", resultado, ""))
+                      con.commit(); continue
                   print(f"    confianza: {confianza} | doc: {doc}")
                   if confianza == "baja":
                     avisos += " [CONFIANCA BAIXA del redactor]"
