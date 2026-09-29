@@ -736,6 +736,28 @@ def comprobar_adjuntos(nombres):
     return rutas, falten
 
 
+def limpiar_adjuntos_heredados(reply):
+    """Treu els adjunts que Outlook arrossega del fil citat.
+
+    Quan es conserva el missatge original a sota, les imatges incrustades
+    (image001.png, logos, firmes) viatgen a l'esborrany amb les referencies
+    trencades i es veuen com a quadrats blancs. L'esborrany nomes ha de portar
+    els documents que hi posem nosaltres."""
+    trets = 0
+    try:
+        for i in range(reply.Attachments.Count, 0, -1):
+            try:
+                reply.Attachments.Item(i).Delete()
+                trets += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    if trets:
+        print(f"    (trets {trets} adjunts heretats del fil citat)")
+    return trets
+
+
 def adjuntar(reply, rutas):
     """Enganxa els documents a l'esborrany. Torna quants n'ha pogut posar."""
     posats = 0
@@ -1944,6 +1966,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                               continue
                           ya_con_borrador |= claves_final
                           reply = msg.Reply()
+                          limpiar_adjuntos_heredados(reply)
                           _dest, _why = destinatario_real(
                               msg, rem, esc.get("reenviadores", []),
                               str(esc.get("borradores_para", "") or "").strip())
@@ -2031,6 +2054,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 else:
                     ya_con_borrador |= claves_final
                     reply = msg.Reply()
+                    limpiar_adjuntos_heredados(reply)
                     _dest, _why = destinatario_real(
                         msg, rem, esc.get("reenviadores", []),
                         str(esc.get("borradores_para", "") or "").strip())
