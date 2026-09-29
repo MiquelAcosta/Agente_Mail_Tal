@@ -1630,6 +1630,22 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 habla, det = habla_de_documentos(asunto, cuerpo, solo_fuerte=True)
                 if habla:
                     sin_borrador, motivo_docs = True, det
+            # SEGURETAT: si el client menciona una matricula i la fitxa trobada
+            # es d'UNA ALTRA, no es respon. Podria ser una confusio de dades a la
+            # BBDD o dues persones relacionades; en tot cas, dir-li l'estat d'un
+            # expedient que no es el seu seria greu.
+            try:
+                _m = REGEX_MATRICULA.search((asunto + " " + cuerpo_nuevo(cuerpo)).upper())
+                _mf = str((ficha or {}).get("matricula") or "").replace(" ", "").upper()
+                if _m and _mf:
+                    _mm = _m.group(0).replace(" ", "").upper()
+                    if _mm != _mf:
+                        print(f"    ATENCIO: el client parla de {_mm} pero la fitxa"
+                              f" trobada es de {_mf} — ho mira una persona")
+                        sin_borrador = True
+                        mover_a_dificil = True
+            except Exception:
+                pass
             # Si la fitxa diu que l'informe pericial esta fet pero NO tenim l'import,
             # la resposta que toca (plantilla E2) no es pot omplir. Abans d'inventar
             # una xifra o deixar un buit, ho mira una persona.
