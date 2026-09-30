@@ -1767,8 +1767,12 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 resto = str(cuerpo or "")[len(cuerpo_ult):].strip()
                 bloque = "LO QUE ACABA DE ESCRIBIR EL CLIENTE (esto es lo que hay que responder):\n" + cuerpo_ult
                 if resto:
-                    bloque += ("\n\nCONTEXTO — mensajes anteriores del hilo (solo para entender"
-                               " el caso; NO clasifiques por esto):\n" + resto[:2500])
+                    bloque += ("\n\nMENSAJES ANTERIORES DEL HILO:\n" + resto[:2500] +
+                               "\n\nCLASIFICA por lo que acaba de escribir el cliente. PERO si su"
+                               " mensaje se apoya en algo anterior ('como le dije', 'en el mensaje"
+                               " anterior', 'segun le comente', 'ya le pregunte'), esa peticion"
+                               " SIGUE PENDIENTE y forma parte de lo que hay que responder:"
+                               " clasifica por ella.")
                     print(f"    (pesa l'ultim missatge: {len(cuerpo_ult)} car. nous"
                           f" + {len(resto)} de context)")
                 c = llamar(ia, PROMPT_CLASIFICADOR, f"HISTORIAL PREVIO con este cliente:\n{hilo_txt}\n\nMENSAJE ACTUAL:\nAsunto: {asunto}\n{bloque}", rapido=True)
@@ -1925,8 +1929,7 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                   # l'estat no respon res: millor donar-li l'arbre al model.
                   if accion_arbol == "texto" and \
                      str(esc.get("literal_solo_estado", "si")).lower() not in ("no","false","off","0") \
-                     and categoria not in ("estado_reclamacion", "cancelacion_desistimiento",
-                                           "coste_comision", "cortesia_breve"):
+                     and categoria not in ("estado_reclamacion", "coste_comision", "cortesia_breve"):
                       print(f"    ARBRE: '{categoria}' no es una pregunta d'estat —"
                             " el model decideix amb l'arbre davant")
                       txt_arbol, accion_arbol = "", ""
@@ -2074,7 +2077,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                                + arbol_txt + ya_dados_txt +
                                f"MENSAJE del cliente:\nAsunto: {asunto}\n"
                                f"LO QUE ACABA DE ESCRIBIR (responde A ESTO):\n{cuerpo_nuevo(cuerpo)}\n"
-                               f"CONTEXTO del hilo (solo para entender el caso):\n{str(cuerpo or '')[:3000]}")
+                               f"HILO COMPLETO:\n{str(cuerpo or '')[:3000]}\n"
+                               "Responde a lo ultimo que ha escrito. Si se refiere a algo que pidio"
+                               " antes y sigue sin respuesta ('como le dije', 'en el mensaje"
+                               " anterior', 'ya le pregunte'), responde TAMBIEN a aquella peticion.")
                   confianza, doc, respuesta = red.get("confianza", ""), red.get("documento_salida", ""), red.get("respuesta", "")
                   respuesta = formatear_respuesta(respuesta, categoria)
                   if respuesta_vacia(respuesta):
