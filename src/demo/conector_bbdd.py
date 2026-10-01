@@ -29,7 +29,8 @@ apto, coche_cerrado, estado_perito, factura, contrato_compra, modelo_576, solici
 denegacion_modelo_576, herencia, poderes_pleitos, ha_vendido_coche,
 envio_fyg, estado_fyg, envio_minsait, estado_minsait,
 total_perito, Diligencias_Preliminares, Solicitando_576, Denegado_576,
-fecha_aviso_ya_esta"""
+fecha_aviso_ya_esta, factura, contrato_compra, modelo_576, solicitud_mod_576,
+anverso_dni, reverso_dni, ruta_contrato"""
 
 
 def _importe_perito(valor):
@@ -56,6 +57,24 @@ def _importe_perito(valor):
 
 NEGATIUS = ("", "no", "n", "0", "false", "null", "none", "-", "pendiente",
             "pendent", "abierto", "sin cerrar", "nan")
+
+
+def _documentos_pendientes(d):
+    """Quins documents falten, segons la BBDD.
+
+    Nomes es demana el que NO hi es. Si el client ja ha enviat el DNI, no se li
+    torna a demanar. 'precio' queda cobert per la factura, el contracte o el 576."""
+    falten = []
+    if not any(str(d.get(k) or "").strip()
+               for k in ("factura", "contrato_compra", "modelo_576",
+                         "solicitud_mod_576", "ruta_contrato")):
+        falten.append("factura")
+    if not str(d.get("ficha_tecnica") or d.get("permiso_circulacion") or "").strip():
+        falten.append("ficha tecnica")
+    if not (str(d.get("anverso_dni") or "").strip()
+            and str(d.get("reverso_dni") or "").strip()):
+        falten.append("dni")
+    return falten
 
 
 def _si(v):
@@ -155,6 +174,7 @@ def _traducir(fila):
         "estado": estado,
         "detalle_interno": detalle,
         "importe_perito": _importe_perito(d.get("total_perito")),
+        "documentos_pendientes": _documentos_pendientes(d),
         "diligencias_preliminares": _texto(d.get("Diligencias_Preliminares")),
         "solicitando_576": _texto(d.get("Solicitando_576")),
         "denegado_576": _texto(d.get("Denegado_576")),

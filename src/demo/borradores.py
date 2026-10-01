@@ -540,7 +540,32 @@ def mover_a_calaix(msg, carpeta_origen, nombre):
             pass
         return True
     except Exception as e:
-        print(f"    (no s'ha pogut moure a {nombre}: {str(e)[:70]})")
+        # Missatge SENCER: el retall amagava la causa real.
+        print(f"    (no s'ha pogut moure a {nombre}: {e})")
+        try:
+            pare = getattr(carpeta_origen, "Parent", None)
+            print(f"       origen='{carpeta_origen.Name}' pare="
+                  f"'{getattr(pare, 'Name', '?')}'")
+            if pare is not None:
+                noms = [str(pare.Folders.Item(i + 1).Name)
+                        for i in range(pare.Folders.Count)]
+                print(f"       carpetes germanes: {', '.join(noms[:10])}")
+        except Exception:
+            pass
+        # Segona via: buscar la carpeta des de l'arrel de la bustia
+        try:
+            arrel = carpeta_origen
+            for _ in range(6):
+                p = getattr(arrel, "Parent", None)
+                if p is None or not hasattr(p, "Folders"):
+                    break
+                arrel = p
+            dest2 = _buscar_o_crear(arrel, nombre)
+            msg.Move(dest2)
+            print(f"       (mogut per la segona via, des de '{arrel.Name}')")
+            return True
+        except Exception as e2:
+            print(f"       (segona via tambe ha fallat: {str(e2)[:80]})")
         return False
 
 
@@ -975,6 +1000,9 @@ def texto_del_arbol(categoria, ficha):
         adj = list(ARBOL.get("adjuntos_estado", {}).get(cod, []))
     else:
         txt = ARBOL.get("por_intencion", {}).get(inten, "")
+        sempre = ARBOL.get("adjuntos_intencion", {}).get(inten, {}).get("_siempre")
+        if sempre:
+            adj.append(sempre)
     if txt == "__HUMANO__":
         print(f"    ARBRE: aquest estat/intencio esta marcat com a HUMA a respuestas.json")
         return "", [], "humano"
@@ -987,10 +1015,8 @@ def texto_del_arbol(categoria, ficha):
         falten = (ficha or {}).get("documentos_pendientes") or []
         dt = ARBOL.get("doc_textos", {})
         if not falten:
-            # No sabem quin document falta: en lloc d'enviar-ho a una persona,
-            # es dona la resposta general de "expedient en revisio".
-            gen = ARBOL.get("por_estado", {}).get("E3", "")
-            return (gen, [], "texto") if gen else ("", [], "humano")
+            # No sabem quins falten: es demanen els tres habituals.
+            falten = ["factura", "ficha tecnica", "dni"]
         txt = txt.replace("{DOC_FALTA}",
                           "\n".join("- " + dt.get(d.lower(), d) for d in falten))
         # El PDF que toca segons el document que falta. Es mira el mapa GLOBAL,
@@ -998,6 +1024,9 @@ def texto_del_arbol(categoria, ficha):
         # s'adjuntava si entrava per I4, i el 576 es mencionava sense adjuntar-lo.
         mapa = dict(ARBOL.get("adjuntos_documento", {}))
         mapa.update(ARBOL.get("adjuntos_intencion", {}).get(inten, {}))
+        sempre = mapa.get("_siempre")
+        if sempre and sempre not in adj:
+            adj.append(sempre)
         for d in falten:
             a = mapa.get(str(d).strip().lower())
             if a and a not in adj:
@@ -1687,7 +1716,14 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
             # es una frase generica demanant la matricula, que sovint el client
             # JA ha escrit. Millor que ho vegi una persona.
             if str(esc.get("borrador_sin_ficha", "no")).lower() in ("no", "false", "off", "0"):
-                if destino == "HUMANO" and motivo in ("sin_ficha_bbdd", "remitente_sin_historial"):
+                # Sense fitxa NO vol dir sense resposta: hi ha preguntes que es
+                # poden contestar igualment (si el cotxe entra, la comissio, com
+                # funciona). Nomes es bloqueja si l'arbre no te res per dir.
+                _t_sf, _a_sf, _acc_sf = texto_del_arbol(categoria, ficha)
+                if _acc_sf == "texto" and _t_sf:
+                    print("    (sense fitxa, pero l'arbre te resposta per a"
+                          f" '{categoria}': es redacta igualment)")
+                elif destino == "HUMANO" and motivo in ("sin_ficha_bbdd", "remitente_sin_historial"):
                     sin_borrador = True
                     mover_a_dificil = True
                     print(f"    SENSE ESBORRANY: client no identificat ({motivo})"
