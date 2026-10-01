@@ -958,6 +958,71 @@ def arbol_como_referencia(ficha):
     return "\n\n".join(parts)
 
 
+def fichas_del_cliente(email):
+    """TOTES les fitxes d'un client (una per vehicle), o llista buida."""
+    try:
+        from conector_bbdd import fichas_por_email
+        return fichas_por_email(email) or []
+    except Exception:
+        return []
+
+
+def matriculas_del_mensaje(asunto, cuerpo):
+    """Totes les matricules que el client menciona al missatge NOU."""
+    t = (asunto + " " + cuerpo_nuevo(cuerpo)).upper()
+    return list(dict.fromkeys(m.replace(" ", "")
+                              for m in REGEX_MATRICULA.findall(t))) if False else \
+           list(dict.fromkeys(m.group(0).replace(" ", "")
+                              for m in REGEX_MATRICULA.finditer(t)))
+
+
+def vehiculos_a_responder(fichas, mats_mail):
+    """De quins vehicles s'ha de parlar.
+
+    Si el client menciona matricules concretes, nomes aquelles (si son seves).
+    Si no en menciona cap i te diversos cotxes, es parla de TOTS: val mes dir-li
+    l'estat dels dos que endevinar per quin pregunta."""
+    if not fichas:
+        return []
+    if not mats_mail:
+        return fichas
+    seves = {str(f.get("matricula") or "").replace(" ", "").upper(): f for f in fichas}
+    triades = [seves[m] for m in mats_mail if m in seves]
+    return triades or fichas
+
+
+def texto_por_vehiculo(categoria, fichas):
+    """Un sol missatge amb un bloc per cotxe.
+
+    Si tots els cotxes estan EXACTAMENT igual, no es repeteix el text: es diu
+    una vegada i es mencionen les dues matricules. Si estan en fases diferents,
+    un paragraf per cadascun encapçalat per la matricula."""
+    if not fichas:
+        return "", [], ""
+    if len(fichas) == 1:
+        return texto_del_arbol(categoria, fichas[0])
+    trossos, adj_tot, accions = [], [], []
+    for f in fichas:
+        t, a, acc = texto_del_arbol(categoria, f)
+        trossos.append((str(f.get("matricula") or "").upper(), t, acc))
+        for x in a:
+            if x not in adj_tot:
+                adj_tot.append(x)
+        accions.append(acc)
+    if any(a in ("humano", "") for a in accions) or not all(t for _, t, _ in trossos):
+        return "", [], "humano"          # si un cotxe no es pot resoldre, tot a persona
+    textos = {t for _, t, _ in trossos}
+    if len(textos) == 1:
+        mats = [m for m, _, _ in trossos]
+        cap = ("En relación con sus vehículos con matrículas "
+               + ", ".join(mats[:-1]) + " y " + mats[-1] + ", la situación es la misma en ambos:\n\n"
+               if len(mats) == 2 else
+               "En relación con sus vehículos (" + ", ".join(mats) + "), la situación es la misma:\n\n")
+        return cap + trossos[0][1], adj_tot, "texto"
+    partes = [f"En cuanto al vehículo con matrícula {m}:\n{t}" for m, t, _ in trossos]
+    return "\n\n".join(partes), adj_tot, "texto"
+
+
 def texto_del_arbol(categoria, ficha):
     """Text OBLIGATORI segons l'arbre: (texto, adjuntos, accion).
 
@@ -1745,7 +1810,10 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                 _mf = str((ficha or {}).get("matricula") or "").replace(" ", "").upper()
                 if _m and _mf:
                     _mm = _m.group(0).replace(" ", "").upper()
-                    if _mm != _mf:
+                    _seves = {str(f.get("matricula") or "").replace(" ", "").upper()
+                              for f in (fichas_del_cliente(rem) if "@" in str(rem or "") else [])}
+                    _seves.add(_mf)
+                    if _mm not in _seves:
                         print(f"    ATENCIO: el client parla de {_mm} pero la fitxa"
                               f" trobada es de {_mf} — ho mira una persona")
                         sin_borrador = True
@@ -1959,7 +2027,16 @@ def procesar_carpeta(nombre_buzon, nombre_carpeta, esc, con, bbdd, dry, max_mail
                     print("    PLANTILLA FIXA -> copy-paste (sense redactor)")
                 else:
                   print("    REDACTOR -> escribiendo...")
-                  txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, ficha)
+                  _fichas_cli = fichas_del_cliente(rem) if "@" in str(rem or "") else []
+                  if len(_fichas_cli) > 1:
+                      _mats = matriculas_del_mensaje(asunto, cuerpo)
+                      _veh = vehiculos_a_responder(_fichas_cli, _mats)
+                      print(f"    MULTI-VEHICLE: el client te {len(_fichas_cli)} cotxes;"
+                            f" es respon per {len(_veh)}"
+                            + (f" ({', '.join(_mats)})" if _mats else " (tots)"))
+                      txt_arbol, adj_arbol, accion_arbol = texto_por_vehiculo(categoria, _veh)
+                  else:
+                      txt_arbol, adj_arbol, accion_arbol = texto_del_arbol(categoria, ficha)
                   # El text literal NOMES si la pregunta es clarament d'estat.
                   # Si el client pregunta una altra cosa, forçar-li el text de
                   # l'estat no respon res: millor donar-li l'arbre al model.
