@@ -172,31 +172,56 @@ def _buscar_enviats(arrel):
     return None
 
 
+def escollir_arrel(arrels, nom):
+    """Mateixa prioritat que escoger_buzon() del projecte:
+    nom EXACTE -> COMENCA per -> CONTE.
+
+    Sense aixo, 'info@recuperatudinero.com' tambe casa amb
+    'Online Archive - info@recuperatudinero.com', i com que l'arxiu surt
+    abans a la llista guanyava ell: 52.330 enviats vells i cap de recent.
+    """
+    n = (nom or "").strip().lower()
+    noms = [str(getattr(a, "Name", "") or "") for a in arrels]
+    for prova in (lambda x: x.lower().strip() == n,
+                  lambda x: x.lower().strip().startswith(n)):
+        tri = [a for a, x in zip(arrels, noms) if prova(x)]
+        if tri:
+            return tri[0], len(tri)
+    conte = [a for a, x in zip(arrels, noms) if n in x.lower()]
+    if not conte:
+        return None, 0
+    return conte[0], len(conte)
+
+
 def carpeta_enviats(buzon):
     """Troba Elements enviats de la bustia demanada.
 
     OJO amb les busties compartides: segons com estigui el perfil, les
     respostes enviades DES de la bustia compartida es desen a la carpeta
-    d'enviats PERSONAL de qui les envia, no a la de la compartida. Si la
-    de la compartida surt buida, cal mirar la personal amb --buscar-tot.
+    d'enviats PERSONAL de qui les envia, no a la de la compartida.
     """
     ol = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
     if not buzon:
         return ol.GetDefaultFolder(5)   # olFolderSentMail
-    for i in range(1, ol.Folders.Count + 1):
-        arrel = ol.Folders.Item(i)
-        if buzon.lower() in str(arrel.Name).lower():
-            c = _buscar_enviats(arrel)
-            if c:
-                return c
-            print(f"  Carpetes dins de '{arrel.Name}':")
-            for j in range(1, arrel.Folders.Count + 1):
-                print(f"     - {arrel.Folders.Item(j).Name}")
-            raise SystemExit("No hi ha cap carpeta d'enviats reconeguda.")
-    print("  Magatzems disponibles al perfil:")
-    for i in range(1, ol.Folders.Count + 1):
-        print(f"     - {ol.Folders.Item(i).Name}")
-    raise SystemExit(f"No trobo cap bustia que contingui '{buzon}'")
+
+    arrels = [ol.Folders.Item(i) for i in range(1, ol.Folders.Count + 1)]
+    arrel, quants = escollir_arrel(arrels, buzon)
+    if arrel is None:
+        print("  Magatzems disponibles al perfil:")
+        for a in arrels:
+            print(f"     - {a.Name}")
+        raise SystemExit(f"No trobo cap bustia que contingui '{buzon}'")
+
+    print(f"    Magatzem triat: '{arrel.Name}'"
+          + (f"   (ATENCIO: {quants} candidats, pot ser ambigu)" if quants > 1 else ""))
+
+    c = _buscar_enviats(arrel)
+    if c:
+        return c
+    print(f"  Carpetes dins de '{arrel.Name}':")
+    for j in range(1, arrel.Folders.Count + 1):
+        print(f"     - {arrel.Folders.Item(j).Name}")
+    raise SystemExit("No hi ha cap carpeta d'enviats reconeguda.")
 
 
 def totes_les_carpetes_enviats():
@@ -327,6 +352,8 @@ def main(buzon, desde, maxim, ruta_csv):
         for nom, c in totes_les_carpetes_enviats():
             if c.EntryID == carpeta.EntryID:
                 continue
+            if "archive" in nom.lower() or "archivo" in nom.lower():
+                continue   # els arxius no porten correu recent
             altres = llegir_enviats(c, desde, maxim)
             if altres:
                 print(f"\n  >>> N'hi ha {len(altres)} a '{nom}'."
