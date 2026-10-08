@@ -160,55 +160,119 @@ def classificar(senyals, bessons):
 
 # ------------------------------------------------------------------ Outlook
 
+NOMS_ENVIATS = ("elementos enviados", "sent items", "enviados",
+                "elements enviats", "elementos enviados ")
+
+
+def _buscar_enviats(arrel):
+    """Busca la carpeta d'enviats dins d'una arrel. None si no hi es."""
+    for j in range(1, arrel.Folders.Count + 1):
+        if str(arrel.Folders.Item(j).Name).lower().strip() in NOMS_ENVIATS:
+            return arrel.Folders.Item(j)
+    return None
+
+
 def carpeta_enviats(buzon):
-    """Troba Elements enviats de la bustia demanada."""
+    """Troba Elements enviats de la bustia demanada.
+
+    OJO amb les busties compartides: segons com estigui el perfil, les
+    respostes enviades DES de la bustia compartida es desen a la carpeta
+    d'enviats PERSONAL de qui les envia, no a la de la compartida. Si la
+    de la compartida surt buida, cal mirar la personal amb --buscar-tot.
+    """
     ol = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
-    if buzon:
-        for i in range(1, ol.Folders.Count + 1):
-            arrel = ol.Folders.Item(i)
-            if buzon.lower() in str(arrel.Name).lower():
-                for j in range(1, arrel.Folders.Count + 1):
-                    nom = str(arrel.Folders.Item(j).Name).lower()
-                    if nom in ("elementos enviados", "sent items", "enviados",
-                               "elements enviats"):
-                        return arrel.Folders.Item(j)
-                raise SystemExit(f"No trobo 'Elementos enviados' dins de '{arrel.Name}'")
-        raise SystemExit(f"No trobo cap bustia que contingui '{buzon}'")
-    return ol.GetDefaultFolder(5)   # olFolderSentMail
+    if not buzon:
+        return ol.GetDefaultFolder(5)   # olFolderSentMail
+    for i in range(1, ol.Folders.Count + 1):
+        arrel = ol.Folders.Item(i)
+        if buzon.lower() in str(arrel.Name).lower():
+            c = _buscar_enviats(arrel)
+            if c:
+                return c
+            print(f"  Carpetes dins de '{arrel.Name}':")
+            for j in range(1, arrel.Folders.Count + 1):
+                print(f"     - {arrel.Folders.Item(j).Name}")
+            raise SystemExit("No hi ha cap carpeta d'enviats reconeguda.")
+    print("  Magatzems disponibles al perfil:")
+    for i in range(1, ol.Folders.Count + 1):
+        print(f"     - {ol.Folders.Item(i).Name}")
+    raise SystemExit(f"No trobo cap bustia que contingui '{buzon}'")
+
+
+def totes_les_carpetes_enviats():
+    """Totes les carpetes d'enviats del perfil, per si la compartida es buida."""
+    ol = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+    fora = []
+    for i in range(1, ol.Folders.Count + 1):
+        arrel = ol.Folders.Item(i)
+        try:
+            c = _buscar_enviats(arrel)
+            if c:
+                fora.append((str(arrel.Name), c))
+        except Exception:
+            continue
+    return fora
 
 
 def llegir_enviats(carpeta, desde, maxim):
     """Llegeix els enviats a partir d'una data. Nomes lectura."""
     items = carpeta.Items
+    total_carpeta = 0
+    try:
+        total_carpeta = items.Count
+    except Exception:
+        pass
+    print(f"    Carpeta '{carpeta.Name}': {total_carpeta} elements en total.")
+    if total_carpeta == 0:
+        return []
+
     try:
         items.Sort("[SentOn]", True)
     except Exception:
         pass
-    filtre = desde.strftime("[SentOn] >= '%m/%d/%Y 00:00 AM'")
-    try:
-        items = items.Restrict(filtre)
-    except Exception:
-        print("    (no s'ha pogut filtrar per data al servidor: es filtra aqui)")
 
-    fora = []
-    for it in items:
+    # La mitjanit en format 12h es '12:00 AM', NO '00:00 AM' (aixo tornava 0).
+    filtrats = None
+    for patro in ("[SentOn] >= '%m/%d/%Y 12:00 AM'",
+                  "[SentOn] >= '%d/%m/%Y 12:00 AM'"):
+        try:
+            prova = items.Restrict(desde.strftime(patro))
+            if prova.Count > 0:
+                filtrats = prova
+                break
+        except Exception:
+            continue
+    if filtrats is None:
+        print("    (el filtre de data no ha donat res: es filtra aqui, mes lent)")
+        filtrats = items
+
+    fora, errors, fora_rang = [], 0, 0
+    for it in filtrats:
         if len(fora) >= maxim:
             break
         try:
-            if str(getattr(it, "Class", "")) not in ("43", "", "None"):
-                pass
-            enviat = it.SentOn
-            if enviat and enviat.replace(tzinfo=None) < desde:
-                continue
+            enviat = getattr(it, "SentOn", None)
+            if enviat is not None:
+                enviat = enviat.replace(tzinfo=None)
+                if enviat < desde:
+                    fora_rang += 1
+                    continue
             fora.append({
-                "data": enviat.replace(tzinfo=None) if enviat else None,
+                "data": enviat,
                 "para": str(getattr(it, "To", "") or ""),
                 "asunto": str(getattr(it, "Subject", "") or ""),
                 "cos": str(getattr(it, "Body", "") or ""),
                 "adj": adjunts_reals(it),
             })
         except Exception:
+            errors += 1
             continue
+
+    if fora_rang:
+        print(f"    {fora_rang} elements descartats per ser anteriors a la data.")
+    if errors:
+        print(f"    ATENCIO: {errors} elements no s'han pogut llegir"
+              " (cites, convocatories o elements no sincronitzats).")
     return fora
 
 
@@ -256,7 +320,24 @@ def main(buzon, desde, maxim, ruta_csv):
     carpeta = carpeta_enviats(buzon)
     enviats = llegir_enviats(carpeta, desde, maxim)
     print(f"  {len(enviats)} respostes enviades al periode.\n")
+
     if not enviats:
+        print("  Cap resultat aqui. Mirant la resta de carpetes d'enviats"
+              " del perfil...\n")
+        for nom, c in totes_les_carpetes_enviats():
+            if c.EntryID == carpeta.EntryID:
+                continue
+            altres = llegir_enviats(c, desde, maxim)
+            if altres:
+                print(f"\n  >>> N'hi ha {len(altres)} a '{nom}'."
+                      f"\n      Les respostes de la bustia compartida es desen aqui."
+                      f"\n      Torna a llancar amb:  --outlook \"{nom}\"\n")
+                return
+        print("  Tampoc n'hi ha a cap altra carpeta d'enviats.\n"
+              "  Possibles causes:\n"
+              "   - la finestra de sincronitzacio no cobreix aquests dies\n"
+              "   - les respostes s'envien des de l'OWA i no es baixen a l'.ost\n"
+              "   - realment no s'ha contestat res en aquest periode\n")
         return
 
     # Bosses de paraules un sol cop.
