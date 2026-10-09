@@ -79,15 +79,39 @@ def ya_respondido(msg):
         return False
 
 
-def subcarpeta(store, nom):
+def subcarpeta(arrel, nom, nivell=0):
+    """Busca la carpeta a QUALSEVOL nivell: els calaixos solen penjar de la
+    safata d'entrada, no de l'arrel de la bustia."""
+    if nivell > 4:
+        return None
     try:
-        for i in range(store.Folders.Count):
-            f = store.Folders.Item(i + 1)
+        for i in range(arrel.Folders.Count):
+            f = arrel.Folders.Item(i + 1)
             if str(f.Name).strip().lower() == nom.strip().lower():
                 return f
+            trobat = subcarpeta(f, nom, nivell + 1)
+            if trobat is not None:
+                return trobat
     except Exception:
         pass
     return None
+
+
+def arbre(arrel, nivell=0, maxim=3):
+    """Imprimeix l'arbre de carpetes, per saber on son els calaixos."""
+    if nivell > maxim:
+        return
+    try:
+        for i in range(arrel.Folders.Count):
+            f = arrel.Folders.Item(i + 1)
+            try:
+                n = f.Items.Count
+            except Exception:
+                n = "?"
+            print(f"    {'  ' * nivell}- {f.Name}  ({n})")
+            arbre(f, nivell + 1, maxim)
+    except Exception:
+        pass
 
 
 def recorrer(carpeta, fins):
@@ -150,6 +174,13 @@ def main(buzon, fins_txt, carpetes, executar):
         extra = f"   ({err} no llegits)" if err else ""
         print(f"    {nom:18}  {len(pend):5} pendents   "
               f"{resp:5} ja respostos   {post:5} posteriors a la data{extra}")
+
+    if not resum:
+        print("\n  No s'ha trobat cap dels calaixos demanats."
+              "\n  Aquestes son les carpetes de la bustia:\n")
+        arbre(store)
+        print("\n  Passa el nom exacte amb --carpetas.\n")
+        return
 
     if not tots:
         print("\n  Cap correu compleix el filtre. Res a fer.\n")
