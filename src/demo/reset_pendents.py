@@ -1,23 +1,26 @@
-"""reset_pendents.py — ALLIBERA DEL REGISTRE ELS CORREUS NO RESPOSTOS
+"""reset_pendents.py — ALLIBERA ELS CORREUS NO RESPOSTOS DELS CALAIXOS
 
-Treu del log_borradores.sqlite les files de correus ANTERIORS (o iguals) a una
-data, EXCLOENT els que ja estan contestats. Aixi l'agent els torna a processar
-i refa els esborranys.
+Recorre NOMES les carpetes de l'automatitzacio (no la safata d'entrada), agafa
+els correus REBUTS fins a una data i que ENCARA NO TENEN RESPOSTA, i treu la
+seva fila del log_borradores.sqlite perque l'agent els torni a processar.
 
-Que NO es resetea (per disseny):
-  OMITIDO%  -> ja respost
-  HILO%     -> el client ha tornat a escriure despres; aquell correu ja no es
-               el viu del fil
+Com sap si un correu esta respost:
+  Llegeix la propietat interna d'Outlook 'last verb' (102 = respost,
+  103 = respost a tots). Aixo es l'estat REAL d'ara mateix, aixi que detecta
+  tambe les respostes que l'equip ha enviat a ma. El 104 (reenviat) no compta.
 
-Per defecte NOMES COMPTA. Cal --ejecutar per esborrar de debo, i sempre fa
-copia de seguretat abans.
+Com casa un correu amb el registre:
+  Pel Message-ID d'internet, que es el que guarda el registre i sobreviu als
+  moviments de carpeta (l'EntryID no).
 
-AIXO NO ESBORRA ELS ESBORRANYS DE L'OUTLOOK. Nomes allibera el registre.
-Els esborranys dolents s'han de treure a ma de la carpeta Esborranys.
+Per defecte NOMES COMPTA. Cal --ejecutar per esborrar, i sempre fa copia abans.
+
+AIXO NO ESBORRA ELS ESBORRANYS DE L'OUTLOOK: nomes allibera el registre.
 
 Us:
-  python reset_pendents.py --fins 2026-09-30
-  python reset_pendents.py --fins 2026-09-30 --ejecutar
+  python reset_pendents.py --outlook "info@recuperatudinero.com" --fins 2026-09-30
+  python reset_pendents.py --outlook "info@recuperatudinero.com" --fins 2026-09-30 --ejecutar
+  python reset_pendents.py --outlook "..." --fins 2026-09-30 --carpetas "1 FACIL"
 """
 
 import argparse
@@ -28,78 +31,169 @@ import sys
 from collections import Counter
 from datetime import datetime
 
+try:
+    import win32com.client
+except ImportError:
+    sys.exit("Falta pywin32:  pip install pywin32")
+
 AQUI = os.path.dirname(os.path.abspath(__file__))
 RUTA = os.path.join(AQUI, "log_borradores.sqlite")
 
-# Motius que NO s'alliberen: el correu ja esta resolt.
-JA_RESOLTS = ("OMITIDO%", "HILO%")
+# Nomes els calaixos de l'automatitzacio. La safata d'entrada NO hi es.
+CALAIXOS = ["1 FACIL", "2 DIFICIL", "3 DESISTIMIENTO"]
+
+# Les mateixes propietats que fa servir borradores.py
+PROP_MSG_ID = "http://schemas.microsoft.com/mapi/proptag/0x1035001F"
+PROP_LAST_VERB = "http://schemas.microsoft.com/mapi/proptag/0x10810003"
 
 
-def condicio():
-    """Clausula WHERE comuna: anteriors a la data i no resolts."""
-    nots = " AND ".join(f"resultado NOT LIKE '{p}'" for p in JA_RESOLTS)
-    return f"date(ts) <= ? AND {nots}"
+def escoger_buzon(stores, nombre):
+    """Igual que a borradores.py: nom exacte -> comenca per -> conte.
+    Sense aixo, 'Online Archive - info@...' guanya i no es troba cap calaix."""
+    n = (nombre or "").strip().lower()
+    noms = [str(getattr(s, "Name", "") or "") for s in stores]
+    for prova in (lambda x: x.lower() == n, lambda x: x.lower().startswith(n)):
+        tri = [s for s, x in zip(stores, noms) if prova(x)]
+        if tri:
+            return tri[0]
+    conte = [s for s, x in zip(stores, noms) if n in x.lower()]
+    return conte[0] if conte else None
 
 
-def main(fins, executar):
-    if not os.path.exists(RUTA):
-        print(f"\n  No trobo el registre a:\n    {RUTA}")
-        print("  Posa aquest script a la MATEIXA carpeta que log_borradores.sqlite")
-        print("  (normalment src\\demo\\) i torna-ho a provar.\n")
-        sys.exit(1)
-
+def id_estable(msg):
+    """El Message-ID d'internet: sobreviu als moviments de carpeta."""
     try:
-        datetime.strptime(fins, "%Y-%m-%d")
+        mid = msg.PropertyAccessor.GetProperty(PROP_MSG_ID)
+        if mid:
+            return "msgid:" + str(mid).strip()
+    except Exception:
+        pass
+    return "outlook:" + str(msg.EntryID)
+
+
+def ya_respondido(msg):
+    """True si el mail ja te resposta enviada. 104 (reenviat) NO compta."""
+    try:
+        return msg.PropertyAccessor.GetProperty(PROP_LAST_VERB) in (102, 103)
+    except Exception:
+        return False
+
+
+def subcarpeta(store, nom):
+    try:
+        for i in range(store.Folders.Count):
+            f = store.Folders.Item(i + 1)
+            if str(f.Name).strip().lower() == nom.strip().lower():
+                return f
+    except Exception:
+        pass
+    return None
+
+
+def recorrer(carpeta, fins):
+    """Torna (pendents, respostos, posteriors, errors) per a una carpeta."""
+    pendents, respostos, posteriors, errors = [], 0, 0, 0
+    try:
+        items = carpeta.Items
+    except Exception:
+        return pendents, respostos, posteriors, 1
+    for it in items:
+        try:
+            rebut = getattr(it, "ReceivedTime", None)
+            if rebut is not None and rebut.replace(tzinfo=None).date() > fins:
+                posteriors += 1
+                continue
+            if ya_respondido(it):
+                respostos += 1
+                continue
+            pendents.append({
+                "id": id_estable(it),
+                "data": rebut.replace(tzinfo=None) if rebut else None,
+                "de": str(getattr(it, "SenderEmailAddress", "") or "")[:40],
+                "asunto": str(getattr(it, "Subject", "") or "")[:46],
+            })
+        except Exception:
+            errors += 1
+    return pendents, respostos, posteriors, errors
+
+
+def main(buzon, fins_txt, carpetes, executar):
+    if not os.path.exists(RUTA):
+        sys.exit(f"\n  No trobo el registre a:\n    {RUTA}\n"
+                 "  Posa aquest script al costat del log_borradores.sqlite.\n")
+    try:
+        fins = datetime.strptime(fins_txt, "%Y-%m-%d").date()
     except ValueError:
         sys.exit("La data ha d'anar en format AAAA-MM-DD, p. ex. 2026-09-30")
 
-    con = sqlite3.connect(RUTA)
-    total = con.execute("SELECT COUNT(*) FROM borradores").fetchone()[0]
-    print(f"\n  Registre: {total} files en total.")
-    print(f"  Data de tall: fins al {fins} inclos.\n")
+    ns = win32com.client.Dispatch("Outlook.Application").GetNamespace("MAPI")
+    stores = [ns.Folders.Item(i + 1) for i in range(ns.Folders.Count)]
+    store = escoger_buzon(stores, buzon)
+    if store is None:
+        print("  Magatzems disponibles:")
+        for s in stores:
+            print(f"     - {s.Name}")
+        sys.exit(f"\n  No trobo cap bustia que contingui '{buzon}'")
 
-    # --- que hi ha en aquest periode, per motiu
-    print("  TOT el que hi ha en aquest periode, per motiu:\n")
-    files = con.execute(
-        "SELECT resultado, COUNT(*) FROM borradores WHERE date(ts) <= ?"
-        " GROUP BY 1 ORDER BY 2 DESC", (fins,)).fetchall()
+    print(f"\n  Bustia: {store.Name}")
+    print(f"  Rebuts fins al {fins} inclos. NOMES correus sense resposta.\n")
 
-    # Agrupa pel prefix abans del paréntesi, que si no surten centenars de linies.
-    grups = Counter()
-    for res, n in files:
-        clau = (res or "(buit)").split(" (")[0].split(" [")[0]
-        grups[clau] += n
-    for clau, n in grups.most_common(12):
-        resolt = any(clau.startswith(p.rstrip("%")) for p in JA_RESOLTS)
-        marca = "  <- NO es tocara (ja resolt)" if resolt else ""
-        print(f"    {n:6}  {clau}{marca}")
+    tots, resum = [], []
+    for nom in carpetes:
+        c = subcarpeta(store, nom)
+        if c is None:
+            print(f"    {nom:18}  NO EXISTEIX en aquesta bustia")
+            continue
+        pend, resp, post, err = recorrer(c, fins)
+        tots.extend(pend)
+        resum.append((nom, len(pend), resp, post, err))
+        extra = f"   ({err} no llegits)" if err else ""
+        print(f"    {nom:18}  {len(pend):5} pendents   "
+              f"{resp:5} ja respostos   {post:5} posteriors a la data{extra}")
 
-    # --- quants s'alliberarien
-    quants = con.execute(
-        f"SELECT COUNT(*) FROM borradores WHERE {condicio()}", (fins,)).fetchone()[0]
-    print(f"\n  {'=' * 52}")
-    print(f"  A RESETEJAR: {quants} correus")
-    print(f"  {'=' * 52}")
-
-    if quants == 0:
-        print("\n  Res a fer.\n")
-        con.close()
+    if not tots:
+        print("\n  Cap correu compleix el filtre. Res a fer.\n")
         return
 
-    # --- mostra'n uns quants per comprovar
-    print("\n  Mostra dels 8 mes recents que s'alliberarien:\n")
-    for ts, rem, asu in con.execute(
-            f"SELECT ts, remitente, asunto FROM borradores WHERE {condicio()}"
-            " ORDER BY ts DESC LIMIT 8", (fins,)):
-        print(f"    {str(ts)[:16]}  {str(rem)[:34]:34} {str(asu)[:40]}")
+    con = sqlite3.connect(RUTA)
+    dins = [p for p in tots
+            if con.execute("SELECT 1 FROM borradores WHERE mail_id=?",
+                           (p["id"],)).fetchone()]
+    print(f"\n  {'=' * 56}")
+    print(f"  Pendents trobats als calaixos: {len(tots)}")
+    print(f"  D'aquests, amb fila al registre: {len(dins)}  <- els que s'alliberen")
+    print(f"  {'=' * 56}")
+
+    if len(tots) - len(dins):
+        print(f"\n  ({len(tots) - len(dins)} no tenen fila al registre:"
+              " l'agent encara no els havia vist. Ja es processaran sols.)")
+
+    if dins:
+        print("\n  Per motiu registrat:\n")
+        motius = Counter()
+        for p in dins:
+            r = con.execute("SELECT resultado FROM borradores WHERE mail_id=?",
+                            (p["id"],)).fetchone()[0] or "(buit)"
+            motius[r.split(" (")[0].split(" [")[0]] += 1
+        for m, n in motius.most_common(10):
+            print(f"    {n:5}  {m}")
+
+        print("\n  Mostra dels 8 mes recents:\n")
+        for p in sorted(dins, key=lambda x: x["data"] or datetime.min,
+                        reverse=True)[:8]:
+            d = p["data"].strftime("%Y-%m-%d %H:%M") if p["data"] else "?"
+            print(f"    {d}  {p['de']:40} {p['asunto']}")
 
     if not executar:
         print("\n  MODE RECOMPTE: no s'ha tocat res.")
-        print("  Per fer-ho de debo, repeteix la comanda amb  --ejecutar\n")
+        print("  Per fer-ho de debo, repeteix amb  --ejecutar\n")
+        con.close()
+        return
+    if not dins:
+        print("\n  Res per alliberar al registre.\n")
         con.close()
         return
 
-    # --- copia de seguretat SEMPRE
     segell = datetime.now().strftime("%Y%m%d_%H%M%S")
     copia = os.path.join(AQUI, f"log_borradores_BACKUP_{segell}.sqlite")
     con.close()
@@ -107,27 +201,30 @@ def main(fins, executar):
     print(f"\n  Copia de seguretat: {os.path.basename(copia)}")
 
     con = sqlite3.connect(RUTA)
-    n = con.execute(f"DELETE FROM borradores WHERE {condicio()}", (fins,)).rowcount
+    n = 0
+    for p in dins:
+        n += con.execute("DELETE FROM borradores WHERE mail_id=?",
+                         (p["id"],)).rowcount
     con.commit()
     queden = con.execute("SELECT COUNT(*) FROM borradores").fetchone()[0]
     con.close()
 
-    print(f"  Alliberats: {n} correus.   Queden al registre: {queden}\n")
-    print("  SEGUENTS PASSOS (en aquest ordre):")
+    print(f"  Alliberats: {n}.   Queden al registre: {queden}\n")
+    print("  SEGUENTS PASSOS:")
     print("   1. Treu de la carpeta Esborranys els esborranys dolents d'aquests")
-    print("      correus. Aixo NO ho fa l'script: ordena per data i esborra'ls.")
-    print("   2. Comprova que la finestra de sincronitzacio de l'Outlook arriba")
-    print("      a aquesta data, o l'agent no podra tornar a llegir els correus.")
-    print("   3. Prova amb pocs abans de deixar-ho corrent:")
-    print("      python borradores.py --outlook \"info@recuperatudinero.com\"")
-    print("         --carpeta \"1 FACIL\" --real --max 5 --dry --csv prova.csv\n")
+    print("      correus. Aixo NO ho fa l'script.")
+    print("   2. Comprova que la finestra de sincronitzacio arriba a aquesta data.")
+    print("   3. Prova amb pocs abans de deixar-ho corrent (--max 5 --dry).\n")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--fins", metavar="AAAA-MM-DD", required=True,
-                    help="data de tall, inclosa")
+    ap.add_argument("--outlook", metavar="BUSTIA", required=True)
+    ap.add_argument("--fins", metavar="AAAA-MM-DD", required=True)
+    ap.add_argument("--carpetas", metavar="LLISTA", default=",".join(CALAIXOS),
+                    help="calaixos separats per comes")
     ap.add_argument("--ejecutar", action="store_true",
                     help="esborra de debo (sense aixo, nomes compta)")
     a = ap.parse_args()
-    main(a.fins, a.ejecutar)
+    main(a.outlook, a.fins, [c.strip() for c in a.carpetas.split(",") if c.strip()],
+         a.ejecutar)
